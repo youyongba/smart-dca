@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const { httpAgent, httpsAgent } = require('./lib/httpAgents');
 const regimeModule = require('./regimeModule');
 const mtfModule = require('./mtfModule');
+const { notifyTrade } = require('./notifier/tradeNotifications');
 
 // 币安现货 API 密钥 (初始从环境变量读取)
 let SPOT_API_KEY = (process.env.BINANCE_SPOT_API_KEY || process.env.BINANCE_API_KEY || '').trim();
@@ -228,7 +229,18 @@ function rememberOrder(targetState, order) {
     if (onStateChangeCallback) onStateChangeCallback();
 }
 
-function completeOrder(targetState) {
+function reportConfirmedTrade(details) {
+    // Notification failures must never turn a committed fill into a failed order.
+    try {
+        Promise.resolve(notifyTrade(details)).catch(() => {
+            console.error('[TradeNotify] Failed to deliver confirmed trade notification');
+        });
+    } catch (_) {
+        console.error('[TradeNotify] Failed to build confirmed trade notification');
+    }
+}
+
+function completeOrder(targetState, tradeDetails) {
     const pending = targetState.pendingOrder;
     if (pending?.market === 'futures') {
         targetState.positionSync = {
@@ -244,6 +256,9 @@ function completeOrder(targetState) {
         // The fill may be real even when its local commit failed. Retain the original intent.
         targetState.pendingOrder = pending;
         throw error;
+    }
+    if (pending && tradeDetails) {
+        reportConfirmedTrade({ ...tradeDetails, pending, position: targetState });
     }
 }
 
@@ -566,6 +581,7 @@ function startBotLoop(getEngineConfig, getEngineState) {
                         
                         let executedQty = 0;
                         let cumQuote = 0;
+                        let order;
                         const multiplier = config.martingaleMultiplier || 1.0;
                         
                         if (config.tradeMode === 'futures') {
@@ -587,16 +603,22 @@ function startBotLoop(getEngineConfig, getEngineState) {
                             
                             const side = isLongTrade ? 'BUY' : 'SELL';
                             const posSide = isLongTrade ? 'LONG' : 'SHORT';
-                            const id = beginOrder(targetState, 'entry', actionLabel, { market: config.tradeMode });
+                            const id = beginOrder(targetState, 'entry', actionLabel, {
+                                market: config.tradeMode, leverage: config.leverage || 100, requestedQty: qtyToBuy
+                            });
                             const res = await executeFuturesOrder(side, qtyToBuy, posSide, id, targetState);
+                            order = res;
                             const fill = confirmedFill(res);
                             executedQty = fill.qty;
                             cumQuote = fill.quote;
                         } else {
                             if (!isLongTrade) throw new Error('现货模式不支持做空!');
                             const currentStepUsdt = config.dcaAmount * Math.pow(multiplier, targetState.activeDcaCount);
-                            const id = beginOrder(targetState, 'entry', actionLabel, { market: config.tradeMode });
+                            const id = beginOrder(targetState, 'entry', actionLabel, {
+                                market: config.tradeMode, requestedQuote: currentStepUsdt
+                            });
                             const res = await executeRealOrder('BUY', null, currentStepUsdt, id, targetState);
+                            order = res;
                             const fill = confirmedFill(res);
                             executedQty = fill.qty;
                             cumQuote = fill.quote;
@@ -645,7 +667,9 @@ function startBotLoop(getEngineConfig, getEngineState) {
                             globalMacdDeathCrossTime = 0;
                         }
                         targetState.lastDcaTime = now; // 写入持久化状态
-                        completeOrder(targetState);
+                        completeOrder(targetState, {
+                            order, fill: { qty: executedQty, quote: cumQuote }, config, isLong: isLongTrade
+                        });
                     } catch (e) {
                         const errorMsg = e.response ? JSON.stringify(e.response.data) : e.message;
                         console.error('[SpotAutoBot] Action Error:', errorMsg);
@@ -717,15 +741,20 @@ function startBotLoop(getEngineConfig, getEngineState) {
                     if (closeQty <= 0) return false;
                     botSignalState.isExecuting = true;
                     try {
-                        const id = beginOrder(targetState, 'close', label, { market: config.tradeMode, requestedQty: closeQty });
+                        const id = beginOrder(targetState, 'close', label, {
+                            market: config.tradeMode, requestedQty: closeQty, leverage: config.leverage
+                        });
                         let fill;
+                        let order;
                         if (config.tradeMode === 'futures') {
                             const side = isLongTrade ? 'SELL' : 'BUY';
                             const posSide = isLongTrade ? 'LONG' : 'SHORT';
                             const res = await executeFuturesOrder(side, closeQty, posSide, id, targetState);
+                            order = res;
                             fill = confirmedFill(res);
                         } else {
                             const res = await executeRealOrder('SELL', closeQty, null, id, targetState);
+                            order = res;
                             fill = confirmedFill(res);
                         }
                         closeQty = fill.qty;
@@ -757,7 +786,7 @@ function startBotLoop(getEngineConfig, getEngineState) {
                         if (label === 'TP2') targetState.tp2Fired = true;
                         if (label === 'TP3') targetState.tp3Fired = true;
                         targetState.slMoved = targetState.totalCoinAmount > 0 && targetState.tp1Fired && config.breakevenSl;
-                        completeOrder(targetState);
+                        completeOrder(targetState, { order, fill, config, isLong: isLongTrade });
                         
                         const actionName = isLongTrade ? '卖出平多' : '买入平空';
                         state.logs.unshift(`[${new Date().toLocaleTimeString('zh-CN', {hour12:false})}] 真实${label} ${actionName}: ${closeQty} BTC (获 ${cumQuote.toFixed(2)})`);
@@ -888,6 +917,7 @@ module.exports = {
     getDeltaStreamStatus,
     getGlobalVpoc: () => Array.from(globalVolumeProfile.entries()),
     notifyManualTrade,
+    reportConfirmedTrade,
     setOnStateChangeCallback,
     botSignalState,
     getTradeRevision: () => tradeRevision,

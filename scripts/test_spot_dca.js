@@ -25,6 +25,7 @@ function harness(overrides = {}) {
     const orders = [];
     const queries = [];
     const snapshots = [];
+    const notifications = [];
     const sockets = [];
     const config = { tradeMode: 'futures', signalWindow: 12, requireMacd: true, triggerMtf: true,
         triggerDelta: false, rsiThreshold: 30, rsiOverboughtThreshold: 70, dcaMaxSteps: 5,
@@ -67,6 +68,10 @@ function harness(overrides = {}) {
             if (name === 'axios') return axios;
             if (name === 'ws') return Socket;
             if (name === './lib/httpAgents') return {};
+            if (name === './notifier/tradeNotifications') return { notifyTrade: details => {
+                notifications.push(JSON.parse(JSON.stringify(details)));
+                if (overrides.notify) return overrides.notify(details);
+            } };
             if (name === './regimeModule') return { getState: () => {
                 if (failIndicators) throw new Error('indicators unavailable');
                 return { indicators };
@@ -80,7 +85,7 @@ function harness(overrides = {}) {
     bot.setOnStateChangeCallback(() => snapshots.push(JSON.parse(JSON.stringify(state))));
     bot.startBotLoop(() => config, () => state);
     return {
-        bot, state, config, orders, queries, snapshots, sockets,
+        bot, state, config, orders, queries, snapshots, sockets, notifications,
         advance(ms) { now += ms; },
         setIndicators(rsi, macd) { indicators = { rsi: [50, rsi, 99], macd: [0, macd, 2], signal: [0, 0, 0] }; },
         failIndicators() { failIndicators = true; },
@@ -253,6 +258,7 @@ test('ACK is not a fill: no fake TP flag and no blind retry', async () => {
     assert.equal(h.state.long.totalCoinAmount, 0.01);
     assert.ok(h.state.long.pendingOrder);
     assert.equal(h.orders.length, 1);
+    assert.equal(h.notifications.length, 0);
 });
 
 test('ambiguous timeout preserves order intent across restart', async () => {
@@ -554,6 +560,10 @@ test('terminal partial short close recovers once and does not erase the remainin
     await e.reconcile();
     assert.equal(e.state.short.totalCoinAmount, 0.006);
     assert.equal(h.orders.length, 0);
+    assert.equal(h.notifications.length, 1);
+    assert.equal(h.notifications[0].recovered, true);
+    assert.equal(h.notifications[0].order.status, 'EXPIRED');
+    assert.equal(h.notifications[0].fill.qty, 0.004);
 });
 
 test('terminal partial short entry recovers the executed amount rather than waiting forever', async () => {
@@ -684,6 +694,7 @@ test('terminal order with zero fills releases the intent without creating a posi
     assert.ok(e.state.short.retryAfter > Date.now());
     assert.equal(e.persisted().positions.short.pendingOrder, undefined);
     assert.equal(h.orders.length, 0);
+    assert.equal(h.notifications.length, 0);
 });
 
 test('failed startup lookup can recover on the next check without submitting another order', async () => {
@@ -752,4 +763,99 @@ test('engine restores positions after initialization and saves atomically', () =
     bot.botSignalState.isExecuting = true;
     routes.get('/override')({ body: { action: 'market-buy', amount: 100 } }, res);
     assert.equal(res.code, 409);
+});
+
+test('多空TP1至TP3各推送一份成交快照，后续仓位变动不覆盖前一份消息', async () => {
+    for (const direction of ['long', 'short']) {
+        const h = harness({ state: { [direction]: position(0.01) } });
+        await h.price(direction === 'long' ? 106 : 94);
+        assert.deepEqual(h.notifications.map(n => n.pending.label), ['TP1', 'TP2', 'TP3']);
+        assert.deepEqual(h.notifications.map(n => n.position.totalCoinAmount), [0.005, 0.002, 0]);
+        assert.deepEqual(h.notifications.map(n => n.fill.qty), [0.005, 0.003, 0.002]);
+        assert.equal(h.notifications.every(n => n.isLong === (direction === 'long')), true);
+        assert.equal(h.notifications[0].pending.before.totalCoinAmount, 0.01);
+        await h.tick();
+        assert.equal(h.notifications.length, 3);
+    }
+});
+
+test('通知同步报错、异步失败或网络一直等待均不阻断自动止盈', async () => {
+    for (const notify of [
+        () => { throw new Error('delivery failed'); },
+        () => Promise.reject(new Error('delivery failed')),
+        () => new Promise(() => {})
+    ]) {
+        const h = harness({ state: { long: position(0.01) }, notify });
+        await h.price(106);
+        assert.equal(h.orders.length, 3);
+        assert.equal(h.notifications.length, 3);
+        assert.equal(h.state.long.totalCoinAmount, 0);
+        assert.equal(h.state.long.pendingOrder, undefined);
+        assert.equal(h.bot.botSignalState.isExecuting, false);
+    }
+});
+
+test('手动现货及合约双向开平仓均在确认后推送，包含实际成交及仓位前后快照', async () => {
+    for (const tradeMode of ['spot', 'futures']) {
+        for (const side of tradeMode === 'spot' ? ['long'] : ['long', 'short']) {
+            for (const kind of ['entry', 'close']) {
+                const h = harness();
+                await h.price(100);
+                const e = recoveryEngineHarness({ config: { tradeMode },
+                    positions: { [side]: kind === 'entry' ? empty() : position(0.01) } }, h);
+                const action = kind === 'entry'
+                    ? (side === 'long' ? 'market-buy' : 'market-buy-short')
+                    : `market-sell-${side}`;
+                const res = { json(body) { this.body = body; }, status(code) { this.code = code; return this; } };
+                await e.routes.get('/override')({ body: { action, amount: 1 } }, res);
+                assert.equal(res.body.ok, true);
+                assert.equal(h.notifications.length, 1);
+                const n = h.notifications[0];
+                assert.equal(n.pending.kind, kind);
+                assert.equal(n.pending.label, 'manual');
+                assert.equal(n.isLong, side === 'long');
+                assert.equal(n.pending.market, tradeMode);
+                assert.equal(n.fill.qty, 0.01);
+                assert.equal(n.fill.quote, 1);
+                assert.equal(n.position.totalCoinAmount, kind === 'entry' ? 0.01 : 0);
+                assert.equal(e.persisted().positions[side].pendingOrder, undefined);
+            }
+        }
+    }
+});
+
+test('自动首仓和下一次加仓各推送一次，保留原信号顺序与冷却', async () => {
+    const h = harness({ state: { isLongBotRunning: true } });
+    await h.price(100);
+    await h.tick();
+    for (let i = 0; i < 2; i++) {
+        h.advance(3600001);
+        h.setIndicators(20, -1);
+        await h.price(100);
+        await h.tick();
+        h.advance(3600001);
+        h.setIndicators(40, 1);
+        await h.price(100);
+        await h.tick();
+    }
+    assert.equal(h.orders.length, 2);
+    assert.equal(h.notifications.length, 2);
+    assert.equal(h.notifications[0].pending.before.totalCoinAmount, 0);
+    assert.ok(h.notifications[1].pending.before.totalCoinAmount > 0);
+    assert.equal(h.notifications[1].position.activeDcaCount, 2);
+    assert.equal(h.notifications[1].pending.kind, 'entry');
+    assert.notEqual(h.notifications[1].pending.label, 'manual');
+});
+
+test('成交存档失败时不发送成功通知，保留原订单等待核对', () => {
+    const h = harness();
+    const target = position(0.01);
+    h.bot.beginOrder(target, 'close', 'manual', { market: 'futures' });
+    h.bot.setOnStateChangeCallback(() => { throw new Error('disk unavailable'); });
+    target.totalCoinAmount = 0;
+    assert.throws(() => h.bot.completeOrder(target, {
+        order: { status: 'FILLED' }, fill: { qty: 0.01, quote: 1 }, config: h.config, isLong: true
+    }), /disk unavailable/);
+    assert.ok(target.pendingOrder);
+    assert.equal(h.notifications.length, 0);
 });

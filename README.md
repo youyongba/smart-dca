@@ -31,6 +31,12 @@ npm start
 
 其它业务变量见 `.env.example` 和各模块源代码，原字段拼写保持不变。通知凭证为空时不发送通知；外部 AI 功能仍需要配置的服务可用。
 
+## 交易通知
+
+手动开平仓、自动首仓/加仓、TP1-TP3、保本止损及原订单成交恢复，在成交确认并保存仓位后异步推送飞书与 Telegram。包含实际成交量价、名义金额、订单号、手续费可用信息、估算平仓毛盈亏、剩余仓位与止盈进度。通知失败不会阻塞交易，也不受浏览器 Token 授权影响。
+
+飞书使用 `FEISHU_WEBHOOK_URL`、`FEISHU_WEBHOOK_SECRET`，需开启 `WEBHOOK_ENABLED=1`（与 MTF 通知共用）。TG 使用 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_VIP_GROUP_ID`，可用 `TELEGRAM_PUSH_ENABLED=0` 单独关闭。示例配置默认关闭通知；已有凭证的部署在未设置 TG 开关时默认发送。具体字段、调用方式及投递限制见 [notifier/README.md](notifier/README.md)。
+
 ## 接口
 
 | 方法 | 路径 | 用途 |

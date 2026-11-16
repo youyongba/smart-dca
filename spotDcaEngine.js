@@ -8,7 +8,7 @@ const mtfModule = require('./mtfModule');
 const regimeModule = require('./regimeModule');
 const { recoverPosition, waitForPositionSnapshot } = require('./lib/spotOrderRecovery');
 
-const { startBotLoop, executeRealOrder, executeFuturesOrder, getCurrentPrice, getDeltaUsdt, getDeltaStreamStatus, getGlobalVpoc, notifyManualTrade, setOnStateChangeCallback, beginOrder, completeOrder, confirmedFill, queryOrder, rejectOrder } = require('./spotAutoBot');
+const { startBotLoop, executeRealOrder, executeFuturesOrder, getCurrentPrice, getDeltaUsdt, getDeltaStreamStatus, getGlobalVpoc, notifyManualTrade, setOnStateChangeCallback, beginOrder, completeOrder, confirmedFill, queryOrder, rejectOrder, reportConfirmedTrade } = require('./spotAutoBot');
 
 // 强制使用绝对路径加载 .env，防止 PM2 工作目录 (cwd) 偏移导致找不到文件
 const envPath = path.resolve(__dirname, '.env');
@@ -215,6 +215,10 @@ async function reconcilePendingOrders() {
                     state.signalMemory[isLong ? 'globalMacdGoldenCrossTime' : 'globalMacdDeathCrossTime'] = 0;
                 }
                 saveData();
+                reportConfirmedTrade({
+                    pending, order, fill, position: target, config,
+                    isLong: direction === 'long', recovered: true
+                });
                 recoveryLogTimes.delete(pending.clientOrderId);
                 state.logs.unshift(`[${new Date().toLocaleTimeString('zh-CN', {hour12:false})}] 原订单核对成功(${direction === 'long' ? '多头' : '空头'} ${pending.label}): 已成交 ${fill.qty} BTC，持仓记录已恢复`);
                 if (state.logs.length > 20) state.logs.length = 20;
@@ -819,7 +823,9 @@ async function closeManualPosition(isLong) {
     const scale = config.tradeMode === 'futures' ? 1000 : 100000;
     const qty = Math.floor(Number(target.totalCoinAmount) * scale + 1e-8) / scale;
     if (!(qty > 0)) throw new Error('没有达到交易所最小精度的可平仓数量，未提交订单');
-    const id = beginOrder(target, 'close', 'manual', { market: config.tradeMode, requestedQty: qty });
+    const id = beginOrder(target, 'close', 'manual', {
+        market: config.tradeMode, requestedQty: qty, leverage: config.leverage
+    });
     const order = config.tradeMode === 'futures'
         ? await executeFuturesOrder(isLong ? 'SELL' : 'BUY', qty, isLong ? 'LONG' : 'SHORT', id, target)
         : await executeRealOrder('SELL', qty, null, id, target);
@@ -828,7 +834,7 @@ async function closeManualPosition(isLong) {
     const recovered = recoverPosition(target, order, config, isLong, fill);
     Object.assign(target, recovered);
     notifyManualTrade(isLong, target);
-    completeOrder(target);
+    completeOrder(target, { order, fill, config, isLong });
     state.logs.unshift(`[${new Date().toLocaleTimeString('zh-CN', {hour12:false})}] 手动平${isLong ? '多' : '空'}成交: ${fill.qty} BTC，剩余 ${target.totalCoinAmount} BTC`);
 }
 
@@ -862,6 +868,7 @@ router.post('/override', express.json(), requireAdmin, async (req, res) => {
       let amt = parseFloat(amount);
       let executedQty = 0;
       let cumQuote = 0;
+      let order;
       
       if (config.tradeMode === 'futures') {
         if (!amt || amt <= 0) throw new Error('无效的开仓金额');
@@ -873,16 +880,20 @@ router.post('/override', express.json(), requireAdmin, async (req, res) => {
         
         const side = action === 'market-buy-short' ? 'SELL' : 'BUY';
         const posSide = action === 'market-buy-short' ? 'SHORT' : 'LONG';
-        const id = beginOrder(targetState, 'entry', 'manual', { market: config.tradeMode, requestedQty: qtyToBuy });
+        const id = beginOrder(targetState, 'entry', 'manual', {
+            market: config.tradeMode, requestedQty: qtyToBuy, leverage: config.leverage
+        });
         const orderRes = await executeFuturesOrder(side, qtyToBuy, posSide, id, targetState);
+        order = orderRes;
         const fill = confirmedFill(orderRes);
         executedQty = fill.qty;
         cumQuote = fill.quote;
       } else {
         if (action === 'market-buy-short') throw new Error('现货模式不支持做空');
         if (!amt || amt <= 0) throw new Error('无效的买入金额');
-        const id = beginOrder(targetState, 'entry', 'manual', { market: config.tradeMode });
+        const id = beginOrder(targetState, 'entry', 'manual', { market: config.tradeMode, requestedQuote: amt });
         const orderRes = await executeRealOrder('BUY', null, amt, id, targetState);
+        order = orderRes;
         const fill = confirmedFill(orderRes);
         executedQty = fill.qty;
         cumQuote = fill.quote;
@@ -926,7 +937,9 @@ router.post('/override', express.json(), requireAdmin, async (req, res) => {
       
       const actionName = action === 'market-buy-short' ? '做空' : '买入';
       state.logs.unshift(`[${new Date().toLocaleTimeString('zh-CN', {hour12:false})}] 手动${actionName}成功: 获 ${executedQty} BTC`);
-      completeOrder(targetState);
+      completeOrder(targetState, {
+          order, fill: { qty: executedQty, quote: cumQuote }, config, isLong: !isShort
+      });
     } catch (e) {
       const errorMsg = e.response ? JSON.stringify(e.response.data) : e.message;
       console.error('[Override Error] BUY/SELL failed:', errorMsg);

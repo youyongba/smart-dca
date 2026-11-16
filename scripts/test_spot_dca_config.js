@@ -25,7 +25,7 @@ function createEngine({ withKeys = false, authToken = 'isolated-admin-token' } =
     const bot = {
         botSignalState: { isExecuting: false }, startBotLoop() {}, setApiKeys() {},
         getTradeRevision: () => 0, setOnStateChangeCallback() {}, getCurrentPrice: () => 0,
-        notifyManualTrade() {}, queryOrder: (...args) => lookup(...args)
+        notifyManualTrade() {}, reportConfirmedTrade() {}, queryOrder: (...args) => lookup(...args)
     };
     const sandbox = {
         module: { exports: {} }, __dirname: root, process: { env: { CONFIG_AUTH_TOKEN: authToken, ...(withKeys ? {

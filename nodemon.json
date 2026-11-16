@@ -1,0 +1,17 @@
+{
+  "watch": [
+    "server.js",
+    "lib",
+    "funding",
+    "regime",
+    "indicators",
+    "trading"
+  ],
+  "ignore": [
+    "data/**",
+    "spotDcaData.json",
+    "*.tmp",
+    ".instance.lock"
+  ],
+  "ext": "js"
+}

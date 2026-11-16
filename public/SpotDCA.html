@@ -1,0 +1,1895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartDCA - Microstructure Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0B0E11;
+            color: #EAECEF;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .panel {
+            background-color: #181A20;
+            border: 1px solid #2B3139;
+            border-radius: 8px;
+        }
+        .text-green { color: #0ECB81; }
+        .text-red { color: #F6465D; }
+        .bg-green-dim { background-color: rgba(14, 203, 129, 0.1); }
+        .bg-red-dim { background-color: rgba(246, 70, 93, 0.1); }
+        .progress-bar { transition: width 0.5s ease-in-out; }
+        .spot-header { flex-wrap: wrap; gap: 16px; }
+        .spot-toolbar { flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+        .spot-toolbar button { flex-shrink: 0; }
+        @media (max-width: 1023px), (max-height: 650px) {
+            body { height: auto !important; min-height: 100vh; overflow-y: auto !important; }
+            .spot-main { flex: none; }
+            .spot-main > .panel { min-height: 320px; overflow-y: visible; }
+        }
+        
+        /* Custom Scrollbar for Modal */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #181A20; }
+        ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #474D57; }
+    </style>
+</head>
+<body class="h-screen flex flex-col p-4 gap-4 overflow-hidden">
+
+    <!-- Header -->
+    <header class="spot-header panel p-4 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-3">
+            <i class="fa-brands fa-bitcoin text-yellow-500 text-3xl"></i>
+            <div>
+                <h1 class="text-xl font-bold tracking-wider">SmartDCA <span class="text-gray-400 text-sm font-normal">| Microstructure Pro</span></h1>
+                <div class="text-xs text-gray-500 mt-1">只做右侧确认 · 拒绝随机游走</div>
+            </div>
+        </div>
+        
+        <div class="spot-toolbar flex items-center">
+            <button id="ui-toggle-visibility" class="text-gray-500 hover:text-gray-300 transition-colors" title="显示/隐藏敏感信息">
+                <i class="fa-solid fa-eye" id="ui-visibility-icon"></i>
+            </button>
+            <div id="ui-spot-balance" class="bg-gray-800 px-3 py-1.5 rounded border border-gray-700 hidden md:block">
+                <!-- Balance injected here -->
+            </div>
+            <button onclick="openConfig()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-sm text-gray-300 transition-colors flex items-center gap-2">
+                <i class="fa-solid fa-sliders"></i> 策略配置
+            </button>
+            <button onclick="openApiSettings()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-sm text-gray-300 transition-colors flex items-center gap-2">
+                <i class="fa-solid fa-key"></i> 接口鉴权
+            </button>
+            <!-- UTC+8 Clock -->
+            <div class="text-right border-l border-gray-700 pl-6">
+                <div class="text-xs text-gray-400">当前时间 (UTC+8)</div>
+                <div id="utc8-clock" class="text-lg font-mono font-semibold text-blue-400">--:--:--</div>
+            </div>
+            <!-- Bot Toggle Buttons -->
+            <div class="flex flex-col gap-2 items-end">
+                <div class="flex items-center gap-2">
+                    <button id="ui-quick-buy-long" onclick="executeQuickTrade('market-buy')" class="px-2 py-1.5 bg-green-600/20 border border-green-500 hover:bg-green-600/40 rounded text-green-500 text-xs font-bold transition-colors">
+                        <i class="fa-solid fa-bolt mr-1"></i>一键做多
+                    </button>
+                    <button id="ui-bot-toggle-long" onclick="toggleBot('long')" class="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 rounded text-gray-300 text-sm font-bold transition-colors cursor-pointer">
+                        <div id="ui-bot-dot-long" class="w-2 h-2 rounded-full bg-gray-500"></div>
+                        <span id="ui-bot-text-long">▶ 启动做多引擎</span>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 hidden" id="ui-short-controls">
+                    <button id="ui-quick-buy-short" onclick="executeQuickTrade('market-buy-short')" class="px-2 py-1.5 bg-red-600/20 border border-red-500 hover:bg-red-600/40 rounded text-red-500 text-xs font-bold transition-colors">
+                        <i class="fa-solid fa-bolt mr-1"></i>一键做空
+                    </button>
+                    <button id="ui-bot-toggle-short" onclick="toggleBot('short')" class="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 rounded text-gray-300 text-sm font-bold transition-colors cursor-pointer">
+                        <div id="ui-bot-dot-short" class="w-2 h-2 rounded-full bg-gray-500"></div>
+                        <span id="ui-bot-text-short">▶ 启动做空引擎</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Discipline & Countdown Bar -->
+    <div class="grid grid-cols-2 gap-4 shrink-0">
+        <div class="panel p-4 flex justify-between items-center border-l-4 border-blue-500">
+            <div>
+                <div class="text-sm text-gray-400">1m K线收盘倒计时 (微观扳机)</div>
+                <div class="text-xs text-gray-500 mt-1">等待倒计时结束确认形态</div>
+            </div>
+            <div id="countdown-1m" class="text-3xl font-mono font-bold text-blue-400">00:00</div>
+        </div>
+        <div class="panel p-4 flex justify-between items-center border-l-4 border-purple-500">
+            <div>
+                <div class="text-sm text-gray-400">1h K线收盘倒计时 (大周期确认)</div>
+                <div class="text-xs text-gray-500 mt-1">耐心等待趋势信号定型</div>
+            </div>
+            <div id="countdown-15m" class="text-3xl font-mono font-bold text-purple-400">00:00</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="spot-main flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
+        
+        <!-- Left: Signal Engine (1h + Zones) -->
+        <div class="panel p-4 flex flex-col overflow-y-auto">
+            <h2 class="text-lg font-bold border-b border-gray-700 pb-2 mb-4"><i class="fa-solid fa-satellite-dish mr-2"></i>大周期环境 (1h)</h2>
+            
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-400">BTC/USDT 现价</span>
+                    <span id="current-price" class="font-mono text-xl text-gray-300">--</span>
+                </div>
+                
+                <div class="bg-gray-800 p-3 rounded">
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm" id="ui-rsi-label">RSI (14) <span class="text-gray-500 text-xs">等待中</span></span>
+                        <span class="text-sm font-mono text-gray-400" id="ui-rsi-val">--</span>
+                    </div>
+                    <div class="w-full bg-gray-700 h-1.5 rounded">
+                        <div id="ui-rsi-bar" class="bg-gray-500 h-1.5 rounded progress-bar" style="width: 50%"></div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 p-3 rounded flex justify-between items-center">
+                    <span class="text-sm">MACD <span class="text-gray-500 text-xs ml-1">(1h)</span></span>
+                    <span class="text-sm text-gray-500 font-bold" id="ui-macd-status">等待确认</span>
+                </div>
+                
+                <div id="ui-signal-alert" class="hidden bg-blue-900/30 border border-blue-500/50 p-2 rounded text-center text-xs text-blue-400 font-bold">
+                    大周期条件已满足，微观扳机监控已激活
+                </div>
+            </div>
+
+            <h2 class="text-lg font-bold border-b border-gray-700 pb-2 mb-4 mt-6"><i class="fa-solid fa-crosshairs mr-2"></i>静态伏击圈</h2>
+            <div class="space-y-3">
+                <div class="flex justify-between text-sm">
+                    <span class="text-gray-400">VAH (价值区高点)</span>
+                    <span class="font-mono" id="ui-vah-val">--</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-yellow-500 font-bold">Naked vPOC</span>
+                    <span class="font-mono text-yellow-500" id="ui-vpoc-val">--</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-gray-400">VAL (价值区低点)</span>
+                    <span class="font-mono" id="ui-val-val">--</span>
+                </div>
+                
+                <div id="ui-va-alert" class="hidden mt-4 p-2 bg-red-dim border border-red-500 rounded text-center text-xs text-red">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> 当前价格处于 VA 内部 (随机游走区)，已屏蔽买入信号
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle: Microstructure (1m) -->
+        <div class="panel p-4 flex flex-col overflow-y-auto">
+            <h2 class="text-lg font-bold border-b border-gray-700 pb-2 mb-4"><i class="fa-solid fa-microscope mr-2"></i>微观结构触发器 (1m)</h2>
+            
+            <div class="flex-1 space-y-5">
+                <!-- MTF Status -->
+                <div class="flex justify-between items-center p-3 bg-gray-800 rounded border-l-2 border-gray-600" id="ui-mtf-box">
+                    <span class="text-sm">MTF 强多信号</span>
+                    <span class="text-gray-500 text-sm font-bold" id="ui-mtf-status">等待确认</span>
+                </div>
+
+                <!-- Delta Monitor -->
+                <div>
+                    <div class="flex justify-between text-sm mb-2">
+                        <span class="text-gray-400" id="ui-delta-label">1m Delta 净值 <span class="text-xs">(阈值: > 2.5M USDT)</span></span>
+                        <span id="delta-val" class="font-mono text-gray-400">--</span>
+                    </div>
+                    <div class="flex h-12 gap-1 items-end" id="delta-chart">
+                        <!-- Bars generated by JS -->
+                    </div>
+                    <div class="text-xs text-gray-500 mt-2 text-right" id="ui-delta-msg">等待 Delta 数据</div>
+                </div>
+
+                <!-- Order Book Walls -->
+                <div>
+                    <div class="text-sm text-gray-400 mb-2">盘口微观结构</div>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs w-12 text-red">卖方vPOC <br><span id="ui-sell-vpoc-price" class="text-[10px]">--</span></span>
+                            <div class="flex-1 bg-gray-700 h-4 rounded overflow-hidden">
+                                <div id="ui-sell-vpoc-bar" class="bg-red-500 h-full progress-bar" style="width: 0%"></div>
+                            </div>
+                            <span id="ui-sell-vpoc-val" class="text-xs font-mono w-16 text-right">0 $</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs w-12 text-green">买方vPOC <br><span id="ui-buy-vpoc-price" class="text-[10px]">--</span></span>
+                            <div class="flex-1 bg-gray-700 h-4 rounded overflow-hidden">
+                                <div id="ui-buy-vpoc-bar" class="bg-green-500 h-full progress-bar" style="width: 0%"></div>
+                            </div>
+                            <span id="ui-buy-vpoc-val" class="text-xs font-mono w-16 text-right">0 $</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pattern Recognition -->
+                <div class="p-3 bg-gray-800 rounded text-sm">
+                    <div class="text-gray-400 mb-2">形态识别引擎</div>
+                    <div id="ui-pattern-box" class="flex items-center gap-2 text-gray-500">
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <span>正在监控订单流微观结构...</span>
+                    </div>
+                    <div id="ui-pattern-desc" class="text-xs text-gray-500 ml-6 mt-1">等待冰山吸收或强买盘信号</div>
+                </div>
+            </div>
+            
+            <button onclick="openOverrideModal()" class="w-full mt-4 py-3 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)]">
+                手动强制介入 (Override)
+            </button>
+        </div>
+
+        <!-- Right: Execution & Risk -->
+        <div class="panel p-4 flex flex-col overflow-y-auto">
+            <h2 class="text-lg font-bold border-b border-gray-700 pb-2 mb-4"><i class="fa-solid fa-shield-cat mr-2"></i>订单执行与资金管理</h2>
+            
+            <div class="space-y-4">
+                <!-- Current Position -->
+                <div id="ui-order-status" role="status" class="mb-3 text-sm text-yellow-500 whitespace-pre-line break-words"></div>
+                <div id="ui-positions-container" class="space-y-2">
+                    <div class="p-4 bg-gray-800 rounded border border-gray-700">
+                        <div class="text-sm text-gray-400 mb-2" id="ui-dca-batch-label">当前现货持仓价值 (暂无持仓)</div>
+                        <div class="text-2xl font-mono font-bold mb-1"><span id="ui-dca-amount">0.00</span> <span class="text-sm font-normal text-gray-400">USDT</span></div>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-gray-500">均价: <span class="font-mono text-gray-300" id="ui-dca-avg-price">0.00</span> | 数量: <span class="font-mono text-gray-300" id="ui-dca-coin-amount">0.0000 BTC</span></span>
+                            <span class="text-gray-500" id="ui-dca-pnl">0.00%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scaled TP and SL Wrapper -->
+                <div id="ui-scaled-tp-wrapper" class="space-y-4 mb-4">
+                    <!-- JS populated TP panels -->
+                </div>
+
+                <!-- Action Logs -->
+                <div class="mt-4">
+                    <div class="text-sm text-gray-400 mb-2">最近执行日志</div>
+                    <div id="ui-action-logs" class="text-xs font-mono text-gray-500 space-y-1 h-24 overflow-y-auto">
+                        <!-- JS populated logs -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Authorization Modal -->
+    <div id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-[60] p-4">
+        <form onsubmit="submitAuthToken(event)" class="bg-gray-900 border border-gray-700 rounded-lg p-6 w-full max-w-sm">
+            <h2 id="auth-title" class="text-xl font-bold mb-4">手动操作授权</h2>
+            <label for="input-auth-token" class="block text-sm text-gray-400 mb-2">CONFIG_AUTH_TOKEN</label>
+            <input type="password" id="input-auth-token" autocomplete="off" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" placeholder="请输入系统鉴权 Token">
+            <p class="mt-3 text-xs text-gray-500">校验成功后记住在当前浏览器，后续操作无需重复输入。请仅在可信设备上授权。</p>
+            <p id="auth-error" role="alert" class="mt-2 text-sm text-red-400"></p>
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button" onclick="closeAuthToken()" class="px-4 py-2 text-gray-400 hover:text-white">取消</button>
+                <button id="auth-submit" type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50">验证并继续</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Config Modal -->
+    <div id="api-modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-lg p-6 w-[400px]">
+            <h2 class="text-xl font-bold mb-4">系统鉴权 & 交易所接口</h2>
+            <div class="space-y-4">
+                <p class="text-sm text-gray-400">系统 Token 已记住，保存时自动携带鉴权。</p>
+                <div class="border-t border-gray-700 my-4"></div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Binance API Key</label>
+                    <input type="text" id="input-api-key" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" placeholder="仅现货/合约 API, 留空保持原样">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Binance API Secret</label>
+                    <input type="password" id="input-api-secret" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" placeholder="留空保持原样">
+                </div>
+                <div class="text-xs text-gray-500 mt-2">
+                    * API Key 将被保存至服务端并持久化。<br/>
+                    * 系统 Token 仅保存在当前浏览器，不会作为交易所密钥保存。
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button onclick="closeApiSettings()" class="px-4 py-2 text-gray-400 hover:text-white">取消</button>
+                <button onclick="saveApiSettings()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">保存并授权</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration Modal -->
+    <div id="config-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-[#181A20] border border-[#2B3139] rounded-xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+            <!-- Modal Header -->
+            <div class="p-5 border-b border-gray-800 flex justify-between items-center shrink-0">
+                <h2 class="text-xl font-bold"><i class="fa-solid fa-sliders text-blue-500 mr-2"></i>交易策略参数配置</h2>
+                <button onclick="closeConfig()" class="text-gray-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Modal Body -->
+            <div class="p-6 overflow-y-auto flex-1">
+                <form id="config-form" class="space-y-8">
+                    
+                    <!-- Trading Mode Switcher -->
+                    <div class="flex p-1 bg-gray-900 rounded-lg border border-gray-700 w-fit mb-6">
+                        <button type="button" id="tab-mode-spot" onclick="setTradeMode('spot')" class="px-6 py-2 rounded-md text-sm font-bold transition-all bg-yellow-600 text-white shadow-lg">
+                            现货 (Spot)
+                        </button>
+                        <button type="button" id="tab-mode-futures" onclick="setTradeMode('futures')" class="px-6 py-2 rounded-md text-sm font-bold transition-all text-gray-400 hover:text-white">
+                            永续合约 (Futures)
+                        </button>
+                    </div>
+
+                    <!-- Futures Config Section -->
+                    <div id="cfg-futures-section" class="hidden">
+                        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-l-2 border-yellow-500 pl-2">永续合约专属参数</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-yellow-900/10 p-4 rounded border border-yellow-900/30">
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">杠杆倍数 (Leverage)</label>
+                                <div class="flex items-center">
+                                    <input type="number" id="cfg-leverage" value="100" min="1" max="125" class="w-full bg-gray-900 border border-gray-700 rounded-l px-3 py-2 text-white focus:outline-none focus:border-yellow-500">
+                                    <span class="bg-gray-800 border border-l-0 border-gray-700 px-3 py-2 rounded-r text-gray-400">x</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-1">单次开仓占比 (保证金 %)</label>
+                                <div class="flex items-center">
+                                    <input type="number" step="0.1" id="cfg-position-size" value="3.0" min="0.1" max="100" class="w-full bg-gray-900 border border-gray-700 rounded-l px-3 py-2 text-white focus:outline-none focus:border-yellow-500">
+                                    <span class="bg-gray-800 border border-l-0 border-gray-700 px-3 py-2 rounded-r text-gray-400">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 1: Signal Engine -->
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-l-2 border-purple-500 pl-2">大周期环境 (1h)</h3>
+                        
+                        <!-- Timeline visual explanation -->
+                        <div class="mb-5 p-3 bg-gray-800 rounded border border-gray-700 text-sm">
+                            <div class="text-gray-400 mb-2 font-bold">信号触发逻辑时序：</div>
+                            <div class="flex items-center gap-2 text-xs">
+                                <span class="bg-purple-900/50 text-purple-300 px-2 py-1 rounded" id="ui-cfg-step1">1. RSI曾超卖</span>
+                                <i class="fa-solid fa-arrow-right text-gray-600"></i>
+                                <span class="bg-purple-900/50 text-purple-300 px-2 py-1 rounded" id="ui-cfg-step2">2. MACD曾金叉</span>
+                                <i class="fa-solid fa-arrow-right text-gray-600"></i>
+                                <span class="bg-blue-900/50 text-blue-300 px-2 py-1 rounded">3. 激活微观扳机监控</span>
+                            </div>
+                            <div class="text-gray-500 mt-2 text-xs" id="ui-cfg-step-note">注：大周期只需“发生过”即可进入准备状态，随后耐心等待 1m 微观扳机扣动。</div>
+                        </div>
+
+                        <div class="grid grid-cols-1 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-300 mb-1" id="ui-cfg-rsi-label">RSI 超卖阈值 (14周期)</label>
+                                    <input type="number" id="cfg-rsi-threshold" value="30" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div id="cfg-rsi-short-container" class="hidden">
+                                    <label class="block text-sm text-gray-300 mb-1">做空 RSI 超买阈值</label>
+                                    <input type="number" id="cfg-rsi-overbought-threshold" value="70" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500">
+                                </div>
+                            </div>
+                            <div class="flex items-center mt-2">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="cfg-macd-require" checked class="hidden peer">
+                                    <div class="w-10 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500 relative"></div>
+                                    <span class="ml-3 text-sm text-gray-300" id="ui-cfg-macd-label">强制要求曾出现 1h MACD 金叉</span>
+                                </label>
+                            </div>
+                            
+                            <!-- Expiration Window -->
+                            <div class="mt-2">
+                                <label class="block text-sm text-gray-300 mb-1">大周期信号有效窗口 (K线根数)</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="cfg-signal-window" value="12" class="w-24 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                                    <span class="text-xs text-gray-500">根 1h K线 (约 12 小时) 内有效</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Microstructure -->
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-l-2 border-blue-500 pl-2">微观扳机 (1m)</h3>
+                        <div class="space-y-4">
+                            <!-- Delta Trigger Options -->
+                            <div>
+                                <label class="block text-sm text-gray-300 mb-2">选择触发条件 (可多选)</label>
+                                <div class="space-y-3 bg-gray-800 p-4 rounded border border-gray-700">
+                                    
+                                    <!-- Option 1: Delta Surge -->
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex items-center h-5 mt-1">
+                                            <input type="checkbox" id="cfg-trigger-delta" checked class="w-4 h-4 bg-gray-900 border-gray-600 rounded text-blue-500 focus:ring-blue-500 focus:ring-2">
+                                        </div>
+                                        <div class="flex-1">
+                                            <label for="cfg-trigger-delta" class="text-sm font-bold text-white cursor-pointer block">1m Delta 异常激增 (买盘/卖盘)</label>
+                                            <div class="text-xs text-gray-400 mt-1 mb-2">做多时监控买盘激增，做空时监控卖盘激增 (阈值绝对值)。</div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs text-gray-500">阈值 (USDT):</span>
+                                                <input type="number" id="cfg-delta-threshold" value="2500000" class="w-32 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="border-t border-gray-700 my-2"></div>
+                                    
+                                    <!-- Option 2: MTF Strong Buy -->
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex items-center h-5 mt-1">
+                                            <input type="checkbox" id="cfg-trigger-mtf" checked class="w-4 h-4 bg-gray-900 border-gray-600 rounded text-blue-500 focus:ring-blue-500 focus:ring-2">
+                                        </div>
+                                        <div class="flex-1">
+                                            <label for="cfg-trigger-mtf" class="text-sm font-bold text-white cursor-pointer block">MTF 1分钟强劲信号 (强多/强空)</label>
+                                            <div class="text-xs text-gray-400 mt-1">依赖多时间框架 (Multiple Time Frame) 共振产生的反转确认信号 (做多看强多，做空看强空)。</div>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Risk & Execution -->
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider border-l-2 border-green-500 pl-2">资金管理与执行</h3>
+                            <button type="button" onclick="generateStrategy()" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 border border-blue-500/30 px-2 py-1 rounded bg-blue-500/10">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> 智能生成参考策略
+                            </button>
+                        </div>
+
+                        <!-- Strategy Generator (Hidden by default) -->
+                        <div id="strategy-generator" class="hidden mb-6 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+                            <div class="text-sm font-bold text-blue-300 mb-3">基于总资金的仓位规划</div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label id="gen-capital-label" class="block text-xs text-gray-400 mb-1">策略总可用资金/名义本金 (USDT)</label>
+                                    <input type="number" id="gen-total-capital" value="50000" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">计划最大 DCA 次数 (子弹数)</label>
+                                    <input type="number" id="gen-max-steps" value="5" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">加仓资金倍数 (马丁格尔系数)</label>
+                                    <select id="gen-martingale" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500">
+                                        <option value="1">等额加仓 (1.0x)</option>
+                                        <option value="1.5">温和递增 (1.5x)</option>
+                                        <option value="2">激进递增 (2.0x)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">目标整体止盈基准 (TP模式)</label>
+                                    <select id="gen-tp-type" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500">
+                                        <option value="percent">固定百分比 (%)</option>
+                                        <option value="atr">动态 ATR (1H周期)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="flex justify-end gap-2">
+                                <button type="button" onclick="closeGenerator()" class="px-3 py-1.5 rounded text-xs text-gray-400 hover:text-white">取消</button>
+                                <button type="button" onclick="applyGeneratedStrategy()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs text-white font-bold">计算并覆盖当前设置</button>
+                            </div>
+                            <div id="gen-result-preview" class="hidden mt-3 p-3 bg-gray-900 border border-gray-700 rounded text-xs text-gray-300">
+                                <!-- JS will populate this -->
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div id="cfg-dca-amount-section">
+                                <label class="block text-sm text-gray-300 mb-1">首仓 (TP0) 基础买入量 (USDT)</label>
+                                <input type="number" step="100" id="cfg-dca-amount" value="3000" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                            </div>
+                            <div class="flex flex-col justify-center gap-3 mt-4">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="cfg-breakeven-sl" checked class="hidden peer">
+                                    <div class="w-10 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500 relative"></div>
+                                    <span class="ml-3 text-sm text-gray-300">TP1 成交后自动保本止损</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="cfg-auto-loop" class="hidden peer">
+                                    <div class="w-10 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 relative"></div>
+                                    <span class="ml-3 text-sm text-gray-300 font-bold text-blue-400">启用自动循环 DCA (自动交易)</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-800 p-4 rounded border border-gray-700">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="block text-sm text-gray-300">分批止盈参数设置 (基于整体持仓均价)</label>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-xs text-gray-400">止盈模式:</label>
+                                    <select id="cfg-tp-mode" class="bg-gray-900 border border-gray-600 rounded px-2 py-0.5 text-white text-xs outline-none">
+                                        <option value="percent">固定百分比 (%)</option>
+                                        <option value="atr_static">静态 ATR (建仓时锁定)</option>
+                                        <option value="atr_dynamic">动态 ATR (随行情浮动)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <!-- 比例设置 -->
+                            <div class="flex gap-4 items-center mb-4">
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP1 仓位占比 (%)</span>
+                                    <input type="number" id="cfg-tp1" value="50" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP2 仓位占比 (%)</span>
+                                    <input type="number" id="cfg-tp2" value="30" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP3 仓位占比 (%)</span>
+                                    <input type="number" id="cfg-tp3" value="20" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                            </div>
+                            
+                            <!-- 目标收益率设置 -->
+                            <div class="flex gap-4 items-center">
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP1 目标数值 (%/ATR)</span>
+                                    <input type="number" step="0.1" id="cfg-tp1-target" value="1.0" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP2 目标数值 (%/ATR)</span>
+                                    <input type="number" step="0.1" id="cfg-tp2-target" value="3.0" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                                <div class="flex-1">
+                                    <span class="text-xs text-gray-400">TP3 目标数值 (%/ATR)</span>
+                                    <input type="number" step="0.1" id="cfg-tp3-target" value="5.0" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1 mt-1 text-white text-center">
+                                </div>
+                            </div>
+                            <div id="tp-config-preview" class="mt-2 p-2 bg-gray-800 rounded border border-gray-700 text-xs text-gray-300 hidden"></div>
+                            
+                            <div id="tp-error" class="text-red-500 text-xs mt-3 hidden">止盈比例总和必须为 100%</div>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+            
+            <!-- Modal Footer -->
+            <div class="p-5 border-t border-gray-800 flex justify-end gap-3 shrink-0 bg-[#181A20] rounded-b-xl">
+                <button onclick="closeConfig()" class="px-5 py-2 rounded text-sm text-gray-300 hover:bg-gray-800 transition-colors">取消</button>
+                <button id="config-save-button" onclick="saveConfig()" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm text-white font-bold transition-colors disabled:opacity-50">保存并应用策略</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Override Modal -->
+    <div id="override-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-[#181A20] border border-red-900/50 rounded-xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="p-5 border-b border-gray-800 bg-red-900/20 flex justify-between items-center">
+                <h2 class="text-lg font-bold text-red-400"><i class="fa-solid fa-triangle-exclamation mr-2 animate-pulse"></i>手动强制介入</h2>
+                <button onclick="closeOverrideModal()" class="text-gray-500 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Body -->
+            <div class="p-6 space-y-5">
+                <div class="p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-300">
+                    <span class="font-bold">警告：</span>您正在绕过系统的 [大周期确认] 与 [微观结构扳机] 规则。手动交易容易受情绪影响，请确认您的决策基于客观盘面。
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-300 mb-2">执行动作</label>
+                    <div class="grid grid-cols-2 gap-2" id="override-tabs">
+                        <button type="button" id="btn-override-buy-long" onclick="switchOverrideTab('market-buy', this)" class="override-tab-btn bg-green-600/20 border border-green-500 text-green-500 py-2 rounded text-sm font-bold">市价开多</button>
+                        <button type="button" id="btn-override-buy-short" onclick="switchOverrideTab('market-buy-short', this)" class="override-tab-btn bg-gray-800 border border-gray-700 text-gray-400 py-2 rounded text-sm hover:bg-gray-700 transition hidden">市价开空</button>
+                        <button type="button" id="btn-override-sell-long" onclick="switchOverrideTab('market-sell-long', this)" class="override-tab-btn bg-gray-800 border border-gray-700 text-gray-400 py-2 rounded text-sm hover:bg-gray-700 transition">市价平多</button>
+                        <button type="button" id="btn-override-sell-short" onclick="switchOverrideTab('market-sell-short', this)" class="override-tab-btn bg-gray-800 border border-gray-700 text-gray-400 py-2 rounded text-sm hover:bg-gray-700 transition hidden">市价平空</button>
+                    </div>
+                </div>
+
+                <!-- Price Input (Hidden by default, shown for Limit Buy) -->
+                <div id="override-price-container" class="hidden">
+                    <label class="block text-sm text-gray-300 mb-1">委托价格 (USDT)</label>
+                    <div class="relative">
+                        <input type="number" id="override-price" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500">
+                        <div class="absolute right-3 top-2 text-gray-500 text-sm">USDT</div>
+                    </div>
+                </div>
+
+                <!-- Amount Input -->
+                <div id="override-amount-container">
+                    <label class="block text-sm text-gray-300 mb-1">介入金额 (USDT)</label>
+                    <div class="relative">
+                        <input type="number" id="override-amount" value="3000" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500">
+                        <div class="absolute right-3 top-2 text-gray-500 text-sm">USDT</div>
+                    </div>
+                </div>
+
+                <!-- Close All Warning -->
+                <div id="override-close-warning" class="hidden p-3 bg-orange-500/10 border border-orange-500/30 rounded text-sm text-orange-300 text-center font-bold">
+                    将以市价卖出当前全部仓位！
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-5 border-t border-gray-800 flex justify-end gap-3 bg-[#181A20]">
+                <button onclick="closeOverrideModal()" class="px-5 py-2 rounded text-sm text-gray-300 hover:bg-gray-800 transition-colors">取消</button>
+                <button onclick="executeOverride()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded text-sm text-white font-bold transition-colors shadow-[0_0_10px_rgba(220,38,38,0.4)]">
+                    确认强制执行
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- API Integration ---
+        let currentConfig = {};
+        let currentState = {};
+        let configRevision = 0;
+        let statusRequestId = 0;
+        let lastAppliedStatusRequest = 0;
+        let currentMacroVpoc = null;
+        let currentRealIndicators = {};
+        let globalVolumeProfile = new Map();
+        let currentPrice = 0; // Removed mock data 64230
+        let isDataVisible = true; // 控制敏感信息显示/隐藏
+
+        // Toggle visibility
+        document.getElementById('ui-toggle-visibility').addEventListener('click', () => {
+            isDataVisible = !isDataVisible;
+            const icon = document.getElementById('ui-visibility-icon');
+            if (isDataVisible) {
+                icon.className = 'fa-solid fa-eye';
+            } else {
+                icon.className = 'fa-solid fa-eye-slash';
+            }
+            renderUI();
+        });
+
+        function updateTpConfigPreview() {
+            const mode = document.getElementById('cfg-tp-mode').value;
+            const t1 = parseFloat(document.getElementById('cfg-tp1-target').value) || 0;
+            const currentAtr = currentRealIndicators?.currentAtr || 0;
+            const previewBox = document.getElementById('tp-config-preview');
+            
+            if (currentPrice === 0) return;
+            previewBox.classList.remove('hidden');
+            if (mode === 'percent') {
+                previewBox.innerHTML = `模式: <b>固定百分比</b> | 预期 TP1 距离: <span class="text-green">±${(currentPrice * t1 / 100).toFixed(2)}</span> 刀`;
+            } else {
+                const isStatic = mode === 'atr_static';
+                previewBox.innerHTML = `当前 1H ATR: <span class="text-yellow-500">${currentAtr.toFixed(2)}</span> | 模式: <b>${isStatic ? '静态' : '动态'} ATR</b> | 预期 TP1 距离: <span class="text-green">±${(currentAtr * t1).toFixed(2)}</span> 刀`;
+            }
+        }
+
+        ['cfg-tp-mode', 'cfg-tp1-target', 'cfg-tp2-target', 'cfg-tp3-target'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', updateTpConfigPreview);
+        });
+
+        // 格式化金额，支持隐藏
+        const formatMoney = (val, fractionDigits = 2) => {
+            if (!isDataVisible) return '******';
+            return val.toLocaleString('en-US', {minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits});
+        };
+
+        let pendingAuth = null;
+
+        async function ensureAuthToken() {
+            try {
+                const token = (localStorage.getItem('CONFIG_AUTH_TOKEN') || '').trim();
+                if (token) return token;
+            } catch (_) {
+                alert('无法访问浏览器本地存储，请允许本站使用 localStorage 后再操作。');
+                return null;
+            }
+            // Do not queue multiple trading actions behind one authorization dialog.
+            if (pendingAuth) return null;
+            return new Promise(resolve => {
+                pendingAuth = { resolve };
+                document.getElementById('input-auth-token').value = '';
+                document.getElementById('auth-error').textContent = '';
+                document.getElementById('auth-submit').disabled = false;
+                document.getElementById('auth-modal').classList.remove('hidden');
+                document.getElementById('auth-modal').classList.add('flex');
+                document.getElementById('input-auth-token').focus();
+            });
+        }
+        
+        function closeAuthToken(token = null) {
+            document.getElementById('auth-modal').classList.add('hidden');
+            document.getElementById('auth-modal').classList.remove('flex');
+            document.getElementById('input-auth-token').value = '';
+            const pending = pendingAuth;
+            pendingAuth = null;
+            if (pending) pending.resolve(token);
+        }
+
+        async function submitAuthToken(event) {
+            event.preventDefault();
+            const pending = pendingAuth;
+            const button = document.getElementById('auth-submit');
+            if (!pending || button.disabled) return;
+            const token = document.getElementById('input-auth-token').value.trim();
+            const error = document.getElementById('auth-error');
+            if (!token) {
+                error.textContent = '请输入 CONFIG_AUTH_TOKEN';
+                return;
+            }
+            button.disabled = true;
+            error.textContent = '';
+            try {
+                const res = await fetch('/api/spot-dca/auth', {
+                    method: 'POST', headers: { 'X-Auth-Token': token }
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || 'Token 校验失败');
+                if (pendingAuth !== pending) return;
+                try {
+                    localStorage.setItem('CONFIG_AUTH_TOKEN', token);
+                } catch (_) {
+                    throw new Error('无法保存 Token，请允许本站使用 localStorage 后重试');
+                }
+                closeAuthToken(token);
+            } catch (e) {
+                if (pendingAuth === pending) error.textContent = e.message;
+            } finally {
+                if (pendingAuth === pending) button.disabled = false;
+            }
+        }
+            
+        async function authFetch(url, options = {}) {
+            const token = await ensureAuthToken();
+            if (!token) throw new Error('已取消授权，操作未执行');
+            
+            const res = await fetch(url, {
+                ...options, headers: { ...options.headers, 'X-Auth-Token': token }
+            });
+            if (res.status === 401) {
+                if (localStorage.getItem('CONFIG_AUTH_TOKEN') === token) {
+                    localStorage.removeItem('CONFIG_AUTH_TOKEN');
+                }
+                throw new Error('Token 不正确或已失效，本次操作未执行。请重新点击操作并输入 Token');
+            }
+            if (!res.ok) {
+                let error = `请求失败 (HTTP ${res.status})`;
+                try {
+                    const body = await res.json();
+                    error = body.error || body.message || error;
+                } catch (_) {}
+                throw new Error(error);
+            }
+            return res;
+        }
+
+        async function openApiSettings() {
+            if (!await ensureAuthToken()) return;
+            document.getElementById('input-api-key').value = '';
+            document.getElementById('input-api-secret').value = '';
+            document.getElementById('api-modal').classList.remove('hidden');
+            document.getElementById('api-modal').classList.add('flex');
+        }
+
+        function closeApiSettings() {
+            document.getElementById('api-modal').classList.add('hidden');
+            document.getElementById('api-modal').classList.remove('flex');
+        }
+
+        async function saveApiSettings() {
+            if (!await ensureAuthToken()) return;
+            const apiKey = document.getElementById('input-api-key').value.trim();
+            const apiSecret = document.getElementById('input-api-secret').value.trim();
+            
+            if (apiKey || apiSecret) {
+                try {
+                    const res = await authFetch('/api/spot-dca/api-keys', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ apiKey, apiSecret })
+                    });
+                    const data = await res.json();
+                    if (!data.ok) throw new Error(data.error || 'Failed to update keys');
+                } catch (e) {
+                    alert('保存 API Keys 失败: ' + e.message);
+                    return;
+                }
+            }
+            closeApiSettings();
+            fetchStatus(); // 刷新状态
+        }
+
+        async function toggleBot(direction = 'long') {
+            if (!await ensureAuthToken()) return;
+            try {
+                const res = await authFetch('/api/spot-dca/toggle-bot', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ direction })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    currentState.isLongBotRunning = data.state.isLongBotRunning;
+                    currentState.isShortBotRunning = data.state.isShortBotRunning;
+                    renderUI();
+                }
+            } catch (e) {
+                console.error("Failed to toggle bot:", e);
+                alert("切换状态失败: " + e.message);
+            }
+        }
+        
+        async function editTpPrice(level, currentPrice, direction) {
+            if (!await ensureAuthToken()) return;
+            const sideStr = direction === 'short' ? '空头' : '多头';
+            const input = prompt(`请输入新的 ${sideStr} TP${level} 止盈价格:\n(输入 0 或留空则恢复按收益率自动计算)`, currentPrice ? currentPrice.toFixed(2) : '');
+            if (input === null) return; // 用户点击取消
+            
+            const price = parseFloat(input);
+            if (input.trim() !== '' && isNaN(price) || price < 0) {
+                alert("请输入有效的数字价格");
+                return;
+            }
+            
+            try {
+                const res = await authFetch('/api/spot-dca/custom-tp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        level, 
+                        price: price === 0 || isNaN(price) ? null : price,
+                        direction
+                    })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    currentState = data.state;
+                    renderUI();
+                }
+            } catch (e) {
+                console.error("Failed to update custom TP:", e);
+                alert("修改失败: " + e.message);
+            }
+        }
+
+        async function refreshStaticAtr() {
+            if (!await ensureAuthToken()) return;
+            try {
+                await authFetch('/api/spot-dca/refresh-atr', { method: 'POST' });
+                fetchStatus();
+            } catch (e) {
+                console.error(e);
+                alert("重新计算止盈失败: " + e.message);
+            }
+        }
+
+        async function fetchStatus() {
+            const revision = configRevision;
+            const requestId = ++statusRequestId;
+            try {
+                const res = await fetch('/api/spot-dca/status');
+                if (!res.ok) throw new Error(`状态接口异常 (HTTP ${res.status})`);
+                const data = await res.json();
+                // A pre-save poll cannot replace the newly confirmed configuration.
+                if (revision !== configRevision || requestId < lastAppliedStatusRequest) return;
+                lastAppliedStatusRequest = requestId;
+                
+                if (data.ok) {
+                    currentConfig = data.config;
+                    currentState = data.state;
+                    currentMacroVpoc = data.macroVpoc || null;
+                    currentRealIndicators = data.realIndicators || {};
+                    if (data.price) currentPrice = data.price;
+                    if (data.mtfState) currentState.mtfState = data.mtfState;
+                    
+                    // Update Global Volume Profile from Backend
+                    if (data.globalVpoc) {
+                        globalVolumeProfile = new Map(data.globalVpoc);
+                    }
+
+                    // 更新真实的指标 UI
+                    if (data.realIndicators) {
+                        // 渲染 1h RSI
+                        if (data.realIndicators.rsi1h !== null && data.realIndicators.rsi1h !== undefined) {
+                            const rsi = data.realIndicators.rsi1h.toFixed(1);
+                            const rsiValEl = document.getElementById('ui-rsi-val');
+                            const rsiBar = document.getElementById('ui-rsi-bar');
+                            
+                            rsiValEl.textContent = rsi;
+                            rsiBar.style.width = `${rsi}%`;
+                            
+                            if (rsi < currentConfig.rsiThreshold) {
+                                rsiValEl.innerHTML = `${rsi} <span class="text-xs text-green">(超卖)</span>`;
+                                rsiValEl.className = 'text-sm font-mono text-green font-bold';
+                                rsiBar.className = 'bg-green-500 h-1.5 rounded progress-bar';
+                            } else if (currentConfig.tradeMode === 'futures' && rsi > (currentConfig.rsiOverboughtThreshold || 70)) {
+                                rsiValEl.innerHTML = `${rsi} <span class="text-xs text-red">(超买)</span>`;
+                                rsiValEl.className = 'text-sm font-mono text-red font-bold';
+                                rsiBar.className = 'bg-red-500 h-1.5 rounded progress-bar';
+                            } else {
+                                rsiValEl.className = 'text-sm font-mono text-gray-400';
+                                rsiBar.className = 'bg-gray-500 h-1.5 rounded progress-bar';
+                            }
+                        }
+
+                        // 渲染 1h MACD
+                        if (data.realIndicators.macd1h) {
+                            const macdState = data.realIndicators.macd1h;
+                            const macdStatusEl = document.getElementById('ui-macd-status');
+                            macdStatusEl.textContent = macdState;
+                            if (macdState.includes('金叉')) {
+                                macdStatusEl.className = 'text-sm text-green font-bold';
+                                macdStatusEl.innerHTML = '<i class="fa-solid fa-arrow-trend-up mr-1"></i>' + macdState;
+                            } else if (macdState.includes('死叉')) {
+                                macdStatusEl.className = 'text-sm text-red font-bold';
+                                macdStatusEl.innerHTML = '<i class="fa-solid fa-arrow-trend-down mr-1"></i>' + macdState;
+                            } else {
+                                macdStatusEl.className = 'text-sm text-gray-500 font-bold';
+                            }
+                        }
+
+                        // 渲染 1m MTF
+                        if (data.realIndicators.mtf1m) {
+                            const mtfState = data.realIndicators.mtf1m;
+                            const mtfBox = document.getElementById('ui-mtf-box');
+                            const mtfStatus = document.getElementById('ui-mtf-status');
+                            mtfStatus.textContent = mtfState;
+                            if (mtfState.includes('强多') || mtfState.includes('偏多')) {
+                                mtfBox.className = 'flex justify-between items-center p-3 bg-gray-800 rounded border-l-2 border-green-500';
+                                mtfStatus.className = 'text-green text-sm font-bold';
+                                mtfStatus.innerHTML = '<i class="fa-solid fa-check mr-1"></i>' + mtfState;
+                            } else if (mtfState.includes('强空') || mtfState.includes('偏空')) {
+                                mtfBox.className = 'flex justify-between items-center p-3 bg-gray-800 rounded border-l-2 border-red-500';
+                                mtfStatus.className = 'text-red text-sm font-bold';
+                            } else {
+                                mtfBox.className = 'flex justify-between items-center p-3 bg-gray-800 rounded border-l-2 border-gray-600';
+                                mtfStatus.className = 'text-gray-500 text-sm font-bold';
+                            }
+                        }
+                    }
+                    
+                    if (data.mtfState && data.mtfState.deltaUsdt !== undefined) {
+                        const deltaUsdt = data.mtfState.deltaUsdt;
+                        const deltaValEl = document.getElementById('delta-val');
+                        deltaValEl.textContent = (deltaUsdt > 0 ? '+' : '') + (deltaUsdt / 1000000).toFixed(2) + 'M USDT';
+                        deltaValEl.className = deltaUsdt >= 0 ? 'font-mono text-green' : 'font-mono text-red';
+                        
+                        const stream = data.deltaStream;
+                        // A zero Delta does not prove that the upstream trade stream is connected.
+                        if (!stream?.fresh) {
+                            document.getElementById('ui-pattern-box').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>等待实时成交数据...</span>';
+                            document.getElementById('ui-pattern-box').className = 'flex items-center gap-2 text-gray-500';
+                            document.getElementById('ui-pattern-desc').textContent = '订单流数据未就绪，暂不识别形态';
+                            document.getElementById('ui-delta-msg').textContent = !stream
+                                ? '成交流状态未知，请更新后端'
+                                : !stream.connected ? '成交流连接中，正在重试...'
+                                : stream.tradeCount === 0 ? '已连接，等待首笔成交...'
+                                : '成交数据已停滞，正在恢复...';
+                        } else if (deltaUsdt < 0 && Math.abs(deltaUsdt) > (currentConfig.deltaThreshold || 2500000)) {
+                            document.getElementById('ui-pattern-box').innerHTML = '<i class="fa-solid fa-shield-halved"></i><span>检测到冰山吸收 (空头力竭)</span>';
+                            document.getElementById('ui-pattern-box').className = 'flex items-center gap-2 text-green';
+                            document.getElementById('ui-pattern-desc').textContent = 'Delta 持续为负，但价格未破买方 vPOC';
+                            document.getElementById('ui-delta-msg').textContent = '发现底部 Delta 激增';
+                        } else if (deltaUsdt > 0 && Math.abs(deltaUsdt) > (currentConfig.deltaThreshold || 2500000)) {
+                            document.getElementById('ui-pattern-box').innerHTML = '<i class="fa-solid fa-rocket"></i><span>检测到主动买盘 (推土机)</span>';
+                            document.getElementById('ui-pattern-box').className = 'flex items-center gap-2 text-green';
+                            document.getElementById('ui-pattern-desc').textContent = '多头主动吃单，突破上层阻力';
+                            document.getElementById('ui-delta-msg').textContent = '发现顶部 Delta 激增';
+                        } else {
+                            document.getElementById('ui-pattern-box').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>正在监控订单流微观结构...</span>';
+                            document.getElementById('ui-pattern-box').className = 'flex items-center gap-2 text-gray-500';
+                            document.getElementById('ui-pattern-desc').textContent = '等待激进吃单...';
+                            document.getElementById('ui-delta-msg').textContent = '成交实时更新，Delta 未达阈值';
+                        }
+                    }
+                    
+                    renderUI();
+                }
+            } catch (e) {
+                console.error("Failed to fetch Spot DCA status:", e);
+            }
+        }
+        
+        function updateVpocUI() {
+            let maxBuyVol = 0, buyVpocP = 0;
+            let maxSellVol = 0, sellVpocP = 0;
+            
+            globalVolumeProfile.forEach((vData, pLevel) => {
+                if (vData.buy > maxBuyVol) {
+                    maxBuyVol = vData.buy;
+                    buyVpocP = pLevel;
+                }
+                if (vData.sell > maxSellVol) {
+                    maxSellVol = vData.sell;
+                    sellVpocP = pLevel;
+                }
+            });
+            
+            const maxVol = Math.max(maxBuyVol, maxSellVol, 1);
+            
+            const formatVol = (vol) => {
+                const volUsdt = vol * currentPrice;
+                if (volUsdt >= 1000000) return (volUsdt / 1000000).toFixed(2) + 'M $';
+                if (volUsdt >= 1000) return (volUsdt / 1000).toFixed(1) + 'K $';
+                return volUsdt.toFixed(0) + ' $';
+            };
+            
+            document.getElementById('ui-buy-vpoc-val').textContent = formatVol(maxBuyVol);
+            document.getElementById('ui-sell-vpoc-val').textContent = formatVol(maxSellVol);
+            document.getElementById('ui-buy-vpoc-price').textContent = buyVpocP || '--';
+            document.getElementById('ui-sell-vpoc-price').textContent = sellVpocP || '--';
+            
+            document.getElementById('ui-buy-vpoc-bar').style.width = (maxBuyVol / maxVol * 100) + '%';
+            document.getElementById('ui-sell-vpoc-bar').style.width = (maxSellVol / maxVol * 100) + '%';
+            
+            // Render Dynamic Ambush Zones based on backend Macro vPOC first, fallback to micro profile
+            if (currentMacroVpoc && currentMacroVpoc.vpoc) {
+                const vah = currentMacroVpoc.vah;
+                const val = currentMacroVpoc.val;
+                
+                document.getElementById('ui-vpoc-val').textContent = currentMacroVpoc.vpoc.toFixed(2);
+                document.getElementById('ui-vah-val').textContent = vah ? vah.toFixed(2) : '--';
+                document.getElementById('ui-val-val').textContent = val ? val.toFixed(2) : '--';
+                
+                if (currentPrice > val && currentPrice < vah) {
+                    document.getElementById('ui-va-alert').classList.remove('hidden');
+                } else {
+                    document.getElementById('ui-va-alert').classList.add('hidden');
+                }
+            } else if (globalVolumeProfile.size > 0) {
+                // Find absolute max volume node as Naked vPOC
+                let absoluteMaxVol = 0;
+                let nakedVpoc = 0;
+                let prices = [];
+                globalVolumeProfile.forEach((vData, pLevel) => {
+                    prices.push(pLevel);
+                    const totalVol = vData.buy + vData.sell;
+                    if (totalVol > absoluteMaxVol) {
+                        absoluteMaxVol = totalVol;
+                        nakedVpoc = pLevel;
+                    }
+                });
+                
+                prices.sort((a,b) => a - b);
+                const vah = prices.length > 1 ? prices[Math.floor(prices.length * 0.8)] : prices[0]; // roughly 80% percentile price
+                const val = prices.length > 1 ? prices[Math.floor(prices.length * 0.2)] : prices[0];
+                
+                document.getElementById('ui-vpoc-val').textContent = nakedVpoc ? nakedVpoc.toFixed(2) : '--';
+                document.getElementById('ui-vah-val').textContent = vah ? vah.toFixed(2) : '--';
+                document.getElementById('ui-val-val').textContent = val ? val.toFixed(2) : '--';
+                
+                if (currentPrice > val && currentPrice < vah) {
+                    document.getElementById('ui-va-alert').classList.remove('hidden');
+                } else {
+                    document.getElementById('ui-va-alert').classList.add('hidden');
+                }
+            }
+        }
+
+        function getFuturesPositionViews() {
+            const positions = (Array.isArray(currentState.futuresPositions) ? currentState.futuresPositions : [])
+                .filter(pos => {
+                    if (!Number.isFinite(Number(pos.positionAmt)) || Number(pos.positionAmt) === 0) return false;
+                    const side = pos.positionSide === 'LONG' || Number(pos.positionAmt) > 0 ? 'long' : 'short';
+                    // A stale exchange row must not resurrect a locally confirmed closed position.
+                    return !currentState[side]?.positionSync || !!currentState[side]?.pendingOrder;
+                });
+            for (const side of ['long', 'short']) {
+                const tracked = currentState[side];
+                const qty = Number(tracked?.totalCoinAmount);
+                const entryPrice = Number(tracked?.averagePrice);
+                if (!(qty > 0 && entryPrice > 0) || positions.some(pos =>
+                    (pos.positionSide === 'LONG' || Number(pos.positionAmt) > 0) === (side === 'long'))) continue;
+                // Confirmed local fills precede the slower account snapshot; these are not mock positions.
+                positions.push({ positionSide: side === 'long' ? 'LONG' : 'SHORT',
+                    positionAmt: side === 'long' ? qty : -qty, entryPrice,
+                    leverage: Number(currentConfig.leverage) || 1, localConfirmed: !tracked.pendingOrder,
+                    reconciliationPending: !!tracked.pendingOrder,
+                    unRealizedProfit: currentPrice > 0 ? (currentPrice - entryPrice) * qty * (side === 'long' ? 1 : -1) : NaN });
+            }
+            return positions;
+        }
+
+        function renderUI() {
+            const futuresPositions = getFuturesPositionViews();
+            const orderStatus = document.getElementById('ui-order-status');
+            if (orderStatus) {
+                const messages = [];
+                for (const side of ['long', 'short']) {
+                    const tracked = currentState[side];
+                    const label = side === 'long' ? '多头' : '空头';
+                    if (tracked?.pendingOrder) {
+                        const order = tracked.pendingOrder;
+                        messages.push(`${label}订单待核对，暂缓该方向交易，不会重复下单。${order.lastError ? `原因：${order.lastError}` : '正在查询原订单。'}`);
+                    } else if (tracked?.positionSync) {
+                        messages.push(`${label}成交已确认，正在同步交易所持仓；本地剩余 ${Number(tracked.totalCoinAmount)} BTC。`);
+                    }
+                }
+                if (currentConfig.tradeMode === 'futures' && currentState.futuresPositionsError) {
+                    messages.push(`交易所持仓同步失败：${currentState.futuresPositionsError}`);
+                }
+                orderStatus.textContent = messages.join('\n');
+            }
+            // Render Bot Toggle Status
+            const btnLong = document.getElementById('ui-bot-toggle-long');
+            const dotLong = document.getElementById('ui-bot-dot-long');
+            const textLong = document.getElementById('ui-bot-text-long');
+            
+            const btnShort = document.getElementById('ui-bot-toggle-short');
+            const dotShort = document.getElementById('ui-bot-dot-short');
+            const textShort = document.getElementById('ui-bot-text-short');
+            
+            if (currentState.isLongBotRunning) {
+                btnLong.className = 'flex items-center gap-2 px-3 py-2 bg-green-dim border border-green-500 hover:bg-green-500/20 rounded text-green text-sm font-bold transition-colors cursor-pointer';
+                dotLong.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+            } else {
+                btnLong.className = 'flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 rounded text-gray-400 text-sm font-bold transition-colors cursor-pointer';
+                dotLong.className = 'w-2 h-2 rounded-full bg-gray-500';
+            }
+
+            if (currentState.isShortBotRunning) {
+                btnShort.className = 'flex items-center gap-2 px-3 py-2 bg-red-dim border border-red-500 hover:bg-red-500/20 rounded text-red text-sm font-bold transition-colors cursor-pointer';
+                dotShort.className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+                textShort.textContent = '▶ 自动做空运行中';
+            } else {
+                btnShort.className = 'flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 rounded text-gray-400 text-sm font-bold transition-colors cursor-pointer';
+                dotShort.className = 'w-2 h-2 rounded-full bg-gray-500';
+                textShort.textContent = '▶ 启动做空引擎';
+            }
+
+            // Show/Hide Short button based on mode and override text for Long button
+            if (currentConfig.tradeMode === 'spot') {
+                btnShort.classList.add('hidden');
+                const shortControls = document.getElementById('ui-short-controls');
+                if(shortControls) shortControls.classList.add('hidden');
+                document.getElementById('ui-quick-buy-long').innerHTML = '<i class="fa-solid fa-bolt mr-1"></i>一键买入(现货)';
+                textLong.textContent = currentState.isLongBotRunning ? '▶ 自动现货交易运行中' : '▶ 启动自动现货交易';
+            } else {
+                btnShort.classList.remove('hidden');
+                const shortControls = document.getElementById('ui-short-controls');
+                if(shortControls) shortControls.classList.remove('hidden');
+                document.getElementById('ui-quick-buy-long').innerHTML = '<i class="fa-solid fa-bolt mr-1"></i>一键做多';
+                textLong.textContent = currentState.isLongBotRunning ? '▶ 自动做多运行中' : '▶ 启动做多引擎';
+            }
+
+            // Render Balance
+            const balanceEl = document.getElementById('ui-spot-balance');
+            if (currentConfig.tradeMode === 'futures') {
+                if (currentState.futuresBalanceUsdt !== undefined) {
+                    balanceEl.innerHTML = `<span class="text-gray-400 text-xs">U本位余额:</span> <span class="font-bold text-yellow-500">${formatMoney(currentState.futuresBalanceUsdt)}</span> <span class="text-gray-500 text-xs">USDT</span>`;
+                    balanceEl.classList.remove('hidden');
+                }
+            } else {
+                if (currentState.spotBalanceUsdt !== undefined) {
+                    balanceEl.innerHTML = `<span class="text-gray-400 text-xs">现货余额:</span> <span class="font-bold text-green-500">${formatMoney(currentState.spotBalanceUsdt)}</span> <span class="text-gray-500 text-xs">USDT</span>`;
+                    balanceEl.classList.remove('hidden');
+                }
+            }
+            if (currentPrice > 0) {
+                document.getElementById('current-price').textContent = currentPrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                document.getElementById('current-price').className = 'font-mono text-xl text-green font-bold';
+            } else {
+                document.getElementById('current-price').textContent = '--';
+                document.getElementById('current-price').className = 'font-mono text-xl text-gray-400';
+            }
+
+            // Render State
+            const modeText = currentConfig.tradeMode === 'futures' ? '合约' : '现货';
+            const posContainer = document.getElementById('ui-positions-container');
+            
+            // 为了处理双向持仓显示止盈的情况，记录当前是否有被追踪的仓位
+            let renderedPosition = false;
+
+            if (currentConfig.tradeMode === 'futures' && futuresPositions.length > 0) {
+                posContainer.innerHTML = futuresPositions.map(pos => {
+                    const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
+                    const sideText = isLong ? '多头' : '空头';
+                    const colorClass = isLong ? 'text-green' : 'text-red';
+                    const notionalUsdt = Math.abs(pos.positionAmt) * currentPrice;
+                    const pnlUsdt = Number(pos.unRealizedProfit);
+                    const pnlPct = (pnlUsdt / (notionalUsdt / pos.leverage)) * 100 || 0;
+                    
+                    const pnlDisplay = !isDataVisible ? '******' : !Number.isFinite(pnlUsdt) ? '--' :
+                        `${pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(2)} USDT (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+                    
+                    const stateObj = isLong ? currentState.long : currentState.short;
+                    
+                    return `
+                    <div class="p-4 bg-gray-800 rounded border border-gray-700">
+                        <div class="flex justify-between items-center mb-2">
+                            <div class="text-sm text-gray-400">当前${modeText}持仓 (${sideText}) - 杠杆 ${pos.leverage}x</div>
+                            <div class="text-xs font-bold bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded">DCA 加仓: ${stateObj?.activeDcaCount || 0} 次</div>
+                        </div>
+                        ${pos.localConfirmed ? '<div class="text-xs text-yellow-500 mb-2">本地成交已确认，等待交易所持仓快照同步</div>' : ''}
+                        ${pos.reconciliationPending ? '<div class="text-xs text-yellow-500 mb-2">以下为上次确认的仓位，当前订单结果尚待核对</div>' : ''}
+                        <div class="text-2xl font-mono font-bold mb-1"><span class="${colorClass}">${formatMoney(notionalUsdt)}</span> <span class="text-sm font-normal text-gray-400">USDT (名义)</span></div>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-gray-500">均价: <span class="font-mono text-gray-300">${formatMoney(pos.entryPrice)}</span> | 数量: <span class="font-mono text-gray-300">${isDataVisible ? pos.positionAmt : '******'} BTC</span></span>
+                            <span class="${pnlUsdt >= 0 ? 'text-green' : 'text-red'} font-bold">${pnlDisplay}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } else if (currentConfig.tradeMode === 'spot' && currentState.spotBalanceBtc > 0) {
+                const btcBal = currentState.spotBalanceBtc;
+                const notionalUsdt = btcBal * currentPrice;
+                const stateObj = currentState.long || {};
+                const avgPrice = stateObj.averagePrice || 0;
+                let pnlHtml = '<span class="text-gray-500">0.00%</span>';
+                if (avgPrice > 0) {
+                    const pnlUsdt = (currentPrice - avgPrice) * btcBal;
+                    const pnlPct = ((currentPrice - avgPrice) / avgPrice) * 100;
+                    const pnlDisplay = !isDataVisible ? '******' : `${pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(2)} USDT (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+                    pnlHtml = `<span class="${pnlUsdt >= 0 ? 'text-green' : 'text-red'} font-bold">${pnlDisplay}</span>`;
+                }
+                
+                let holdingTimeStr = '--';
+                if (stateObj.entryTime) {
+                    const diffMs = Date.now() - stateObj.entryTime;
+                    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                    if (diffHours >= 24) {
+                        holdingTimeStr = `${Math.floor(diffHours/24)}天 ${diffHours%24}时 ${diffMins}分`;
+                    } else {
+                        holdingTimeStr = `${diffHours}时 ${diffMins}分`;
+                    }
+                }
+                const fees = stateObj.totalFees || 0;
+                
+                posContainer.innerHTML = `
+                <div class="p-4 bg-gray-800 rounded border border-gray-700">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-sm text-gray-400">当前${modeText}持仓价值</div>
+                        <div class="text-xs font-bold bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded">DCA 加仓: ${stateObj.activeDcaCount || 0} 次</div>
+                    </div>
+                    <div class="text-2xl font-mono font-bold mb-1"><span class="text-green">${formatMoney(notionalUsdt)}</span> <span class="text-sm font-normal text-gray-400">USDT</span></div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-gray-500">均价: <span class="font-mono text-gray-300">${avgPrice > 0 ? formatMoney(avgPrice) : '--'}</span> | 数量: <span class="font-mono text-gray-300">${isDataVisible ? btcBal.toFixed(4) : '******'} BTC</span></span>
+                        ${pnlHtml}
+                    </div>
+                    <div class="flex justify-between text-xs mt-2 pt-2 border-t border-gray-700">
+                        <span class="text-gray-500">持仓时间: <span class="font-mono text-gray-300">${holdingTimeStr}</span></span>
+                        <span class="text-gray-500" title="包含资金费率和交易手续费，已计入上方均价成本中">费用成本: <span class="font-mono ${fees > 0 ? 'text-red' : (fees < 0 ? 'text-green' : 'text-gray-300')}">${fees > 0 ? '-' : (fees < 0 ? '+' : '')}${Math.abs(fees).toFixed(2)} USDT</span></span>
+                    </div>
+                </div>`;
+            } else {
+                posContainer.innerHTML = `
+                <div class="p-4 bg-gray-800 rounded border border-gray-700">
+                    <div class="text-sm text-gray-400 mb-2">当前${modeText}持仓价值 (暂无持仓)</div>
+                    <div class="text-2xl font-mono font-bold mb-1"><span class="text-gray-500">0.00</span> <span class="text-sm font-normal text-gray-400">USDT</span></div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-gray-500">均价: <span class="font-mono text-gray-300">0.00</span> | 数量: <span class="font-mono text-gray-300">0.0000 BTC</span></span>
+                        <span class="text-gray-500">0.00%</span>
+                    </div>
+                    <div class="flex justify-between text-xs mt-2 pt-2 border-t border-gray-700">
+                        <span class="text-gray-500">持仓时间: <span class="font-mono text-gray-300">--</span></span>
+                        <span class="text-gray-500">费用成本: <span class="font-mono text-gray-300">0.00 USDT</span></span>
+                    </div>
+                </div>`;
+            }
+            
+            const avgPrice = currentState.averagePrice || 0;
+            
+            let tpPanelsHtml = '';
+            
+            const renderSingleTpPanel = (posSide, entryPrice, isTracked, stateObj) => {
+                const tpMode = currentConfig.tpMode || 'percent';
+                const currentAtr = currentRealIndicators?.currentAtr || 0;
+                const activeAtr = (tpMode === 'atr_static' && isTracked && stateObj?.lockedAtr > 0) ? stateObj.lockedAtr : currentAtr;
+                
+                const tp1Target = currentConfig.tp1Target || 1.0;
+                const tp2Target = currentConfig.tp2Target || 3.0;
+                const tp3Target = currentConfig.tp3Target || 5.0;
+                
+                let tp1PriceAuto, tp2PriceAuto, tp3PriceAuto;
+                let tp1LabelTxt, tp2LabelTxt, tp3LabelTxt;
+                
+                const isLong = (posSide === 'long' || posSide === 'LONG');
+                const sign = isLong ? 1 : -1;
+                
+                if (tpMode.startsWith('atr') && activeAtr > 0) {
+                    tp1PriceAuto = entryPrice + sign * (activeAtr * tp1Target);
+                    tp2PriceAuto = entryPrice + sign * (activeAtr * tp2Target);
+                    tp3PriceAuto = entryPrice + sign * (activeAtr * tp3Target);
+                    
+                    const modeTxt = tpMode === 'atr_static' ? `静态ATR:${activeAtr.toFixed(1)}` : `动态ATR:${activeAtr.toFixed(1)}`;
+                    tp1LabelTxt = `目标 +${tp1Target}x (${modeTxt})`;
+                    tp2LabelTxt = `目标 +${tp2Target}x (${modeTxt})`;
+                    tp3LabelTxt = `目标 +${tp3Target}x (${modeTxt})`;
+                } else {
+                    if (sign === -1) {
+                        tp1PriceAuto = entryPrice * (1 - (tp1Target / 100));
+                        tp2PriceAuto = entryPrice * (1 - (tp2Target / 100));
+                        tp3PriceAuto = entryPrice * (1 - (tp3Target / 100));
+                    } else {
+                        tp1PriceAuto = entryPrice * (1 + (tp1Target / 100));
+                        tp2PriceAuto = entryPrice * (1 + (tp2Target / 100));
+                        tp3PriceAuto = entryPrice * (1 + (tp3Target / 100));
+                    }
+                    
+                    tp1LabelTxt = `目标 +${tp1Target}%`;
+                    tp2LabelTxt = `目标 +${tp2Target}%`;
+                    tp3LabelTxt = `目标 +${tp3Target}%`;
+                }
+                
+                const tp1Price = (isTracked && stateObj?.customTp1Price) ? stateObj.customTp1Price : tp1PriceAuto;
+                const tp2Price = (isTracked && stateObj?.customTp2Price) ? stateObj.customTp2Price : tp2PriceAuto;
+                const tp3Price = (isTracked && stateObj?.customTp3Price) ? stateObj.customTp3Price : tp3PriceAuto;
+                
+                const label1 = (isTracked && stateObj?.customTp1Price) ? `TP1 (${currentConfig.tp1 || 50}%) | 手动自定义` : `TP1 (${currentConfig.tp1 || 50}%) | ${tp1LabelTxt}`;
+                const label2 = (isTracked && stateObj?.customTp2Price) ? `TP2 (${currentConfig.tp2 || 30}%) | 手动自定义` : `TP2 (${currentConfig.tp2 || 30}%) | ${tp2LabelTxt}`;
+                const label3 = (isTracked && stateObj?.customTp3Price) ? `TP3 (${currentConfig.tp3 || 20}%) | 手动自定义` : `TP3 (${currentConfig.tp3 || 20}%) | ${tp3LabelTxt}`;
+                
+                const getTpRowHtml = (level, label, price, fired) => {
+                    if (fired) {
+                        return `<div class="flex items-center justify-between p-2 bg-gray-800 rounded text-sm opacity-50">
+                            <span class="text-gray-400">${label}</span>
+                            <div class="flex items-center">
+                                <span class="font-mono line-through">${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                            </div>
+                            <span class="text-green text-xs"><i class="fa-solid fa-check"></i> 已触发</span>
+                        </div>`;
+                    } else {
+                        const editIconHtml = isTracked ? `<i class="fa-solid fa-pen-to-square ml-2 text-gray-600 hover:text-blue-400 cursor-pointer" onclick="editTpPrice(${level}, ${price}, '${posSide}')"></i>` : '';
+                        return `<div class="flex items-center justify-between p-2 bg-gray-800 rounded text-sm">
+                            <span class="text-gray-400">${label}</span>
+                            <div class="flex items-center">
+                                <span class="font-mono">${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                ${editIconHtml}
+                            </div>
+                            <span class="text-blue-400 text-xs">${isTracked ? '等待中' : '<span class="text-yellow-500/70">静态监控</span>'}</span>
+                        </div>`;
+                    }
+                };
+
+                const refreshBtnHtml = (isTracked && tpMode === 'atr_static') ? `<button onclick="refreshStaticAtr()" class="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded shadow transition-colors"><i class="fa-solid fa-rotate-right mr-1"></i>重新计算止盈</button>` : '';
+                
+                let slHtml = '';
+                if (isTracked) {
+                    if (stateObj?.tp1Fired && currentConfig.breakevenSl) {
+                        slHtml = `<div class="mt-4 p-3 bg-green-dim border border-green-500 rounded text-sm">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-green font-bold"><i class="fa-solid fa-shield mr-1"></i>动态保本止损已激活</span>
+                            </div>
+                            <div class="text-xs text-green-400">TP1 已成交，尾仓保本止损触发价 ${(entryPrice * (isLong ? 1.0005 : 0.9995)).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}（含 0.05% 缓冲）</div>
+                        </div>`;
+                    } else if (currentConfig.breakevenSl) {
+                        slHtml = `<div class="mt-4 p-3 bg-gray-800 border border-gray-700 rounded text-sm">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-gray-400 font-bold"><i class="fa-solid fa-shield mr-1"></i>动态保本止损等待激活</span>
+                            </div>
+                            <div class="text-xs text-gray-500">当 TP1 成交后，剩余仓位止损线将上移至均价</div>
+                        </div>`;
+                    }
+                }
+
+                return `
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-sm text-gray-400">分批止盈系统 (${isLong ? '多头' : '空头'})${!isTracked ? ' <span class="text-xs text-yellow-500 font-bold ml-1 px-1 bg-yellow-500/20 rounded">未托管 (不会自动卖出)</span>' : ''}</div>
+                        ${refreshBtnHtml}
+                    </div>
+                    <div class="space-y-2">
+                        ${stateObj?.pendingOrder ? '<div class="p-2 text-red-400 text-sm">订单成交待核对，系统正在查询原订单；确认后自动恢复托管，不会重复下单。</div>' : ''}
+                        ${getTpRowHtml(1, label1, tp1Price, isTracked && stateObj?.tp1Fired)}
+                        ${getTpRowHtml(2, label2, tp2Price, isTracked && stateObj?.tp2Fired)}
+                        ${getTpRowHtml(3, label3, tp3Price, isTracked && stateObj?.tp3Fired)}
+                    </div>
+                    ${slHtml}
+                </div>`;
+            };
+
+            if (currentConfig.tradeMode === 'futures' && futuresPositions.length > 0) {
+                futuresPositions.forEach(pos => {
+                    const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
+                    const posSide = isLong ? 'long' : 'short';
+                    const stateObj = isLong ? currentState.long : currentState.short;
+                    // 持仓保护和止盈记录不依赖自动开仓开关。
+                    const isTracked = stateObj?.totalCoinAmount > 0;
+                    tpPanelsHtml += renderSingleTpPanel(posSide, stateObj?.averagePrice || pos.entryPrice, isTracked, stateObj);
+                });
+            } else if (currentConfig.tradeMode === 'spot' && currentState.spotBalanceBtc > 0) {
+                tpPanelsHtml += renderSingleTpPanel('long', currentState.long?.averagePrice || currentPrice, currentState.long?.totalCoinAmount > 0, currentState.long);
+            } else {
+                tpPanelsHtml = `
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-sm text-gray-400">分批止盈系统 (Scaled TP)</div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between p-2 bg-gray-800 rounded text-sm opacity-50">
+                            <span class="text-gray-400">TP1 (50%)</span><span class="font-mono">--</span><span class="text-gray-500 text-xs">等待建仓</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-800 rounded text-sm opacity-50">
+                            <span class="text-gray-400">TP2 (30%)</span><span class="font-mono">--</span><span class="text-gray-500 text-xs">等待建仓</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-800 rounded text-sm opacity-50">
+                            <span class="text-gray-400">TP3 (20%)</span><span class="font-mono">--</span><span class="text-gray-500 text-xs">等待建仓</span>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            
+            const wrapper = document.getElementById('ui-scaled-tp-wrapper');
+            if (wrapper) wrapper.innerHTML = tpPanelsHtml;
+            
+            // Render Balance
+            const usdtBal = currentState.spotBalanceUsdt || 0;
+            const btcBal = currentState.spotBalanceBtc || 0;
+            // Balance already rendered above based on mode.
+            
+            // Logs
+            const logContainer = document.getElementById('ui-action-logs');
+            if (logContainer) {
+                logContainer.innerHTML = (currentState.logs || []).map(log => `<div>${log}</div>`).join('');
+            }
+        }
+
+        // --- Clock & Countdown Logic ---
+        function updateClock() {
+            const now = new Date();
+            const options = { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+            document.getElementById('utc8-clock').textContent = now.toLocaleTimeString('zh-CN', options);
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        function updateCountdowns() {
+            const now = new Date();
+            const secLeft = 60 - now.getSeconds();
+            document.getElementById('countdown-1m').textContent = `00:${secLeft.toString().padStart(2, '0')}`;
+            
+            const minLeft = 59 - now.getMinutes();
+            document.getElementById('countdown-15m').textContent = `${minLeft.toString().padStart(2, '0')}:${secLeft.toString().padStart(2, '0')}`;
+        }
+        setInterval(updateCountdowns, 1000);
+        updateCountdowns();
+
+        setInterval(fetchStatus, 2000);
+        setInterval(updateVpocUI, 1000);
+        fetchStatus();
+
+        // --- Configuration Logic ---
+        const modal = document.getElementById('config-modal');
+        
+        let currentTradeMode = 'spot';
+
+        function setTradeMode(mode) {
+            if (!['spot', 'futures'].includes(mode)) return;
+            currentTradeMode = mode;
+            const btnSpot = document.getElementById('tab-mode-spot');
+            const btnFutures = document.getElementById('tab-mode-futures');
+            const futuresSection = document.getElementById('cfg-futures-section');
+            const dcaAmountSection = document.getElementById('cfg-dca-amount-section');
+            
+            // UI elements for short logic
+            const rsiShortContainer = document.getElementById('cfg-rsi-short-container');
+            const step1Label = document.getElementById('ui-cfg-step1');
+            const step2Label = document.getElementById('ui-cfg-step2');
+            const stepNote = document.getElementById('ui-cfg-step-note');
+            const rsiMainLabel = document.getElementById('ui-cfg-rsi-label');
+            const macdMainLabel = document.getElementById('ui-cfg-macd-label');
+            
+            if (mode === 'spot') {
+                btnSpot.className = 'px-6 py-2 rounded-md text-sm font-bold transition-all bg-yellow-600 text-white shadow-lg';
+                btnFutures.className = 'px-6 py-2 rounded-md text-sm font-bold transition-all text-gray-400 hover:text-white';
+                futuresSection.classList.add('hidden');
+                dcaAmountSection.classList.remove('hidden');
+                
+                // Hide short logic in spot mode
+                rsiShortContainer.classList.add('hidden');
+                step1Label.textContent = "1. RSI曾超卖";
+                step2Label.textContent = "2. MACD曾金叉";
+                stepNote.textContent = "注：大周期只需“发生过”即可进入准备状态，随后耐心等待 1m 微观扳机扣动。";
+                rsiMainLabel.textContent = "RSI 超卖阈值 (14周期)";
+                macdMainLabel.textContent = "强制要求曾出现 1h MACD 金叉";
+            } else {
+                btnFutures.className = 'px-6 py-2 rounded-md text-sm font-bold transition-all bg-yellow-600 text-white shadow-lg';
+                btnSpot.className = 'px-6 py-2 rounded-md text-sm font-bold transition-all text-gray-400 hover:text-white';
+                futuresSection.classList.remove('hidden');
+                dcaAmountSection.classList.add('hidden'); // 永续合约用百分比计算仓位，隐藏固定U数额
+                
+                // Show short logic in futures mode
+                rsiShortContainer.classList.remove('hidden');
+                step1Label.textContent = "1. RSI曾超卖/超买";
+                step2Label.textContent = "2. MACD曾金叉/死叉";
+                stepNote.textContent = "注：大周期只需“发生过”即可进入准备状态，随后耐心等待 1m 微观扳机扣动。做空逻辑与之相反。";
+                rsiMainLabel.textContent = "做多 RSI 超卖阈值";
+                macdMainLabel.textContent = "强制要求曾出现 1h MACD 金叉(做多)/死叉(做空)";
+            }
+        }
+
+        async function openConfig() {
+            if (!await ensureAuthToken()) return;
+            if (!['spot', 'futures'].includes(currentConfig.tradeMode)) {
+                await fetchStatus();
+                if (!['spot', 'futures'].includes(currentConfig.tradeMode)) {
+                    alert('尚未读取到当前策略，请检查 SpotDCA 服务连接后重试。未修改任何配置。');
+                    return;
+                }
+            }
+            modal.classList.remove('hidden');
+            // Populate form with currentConfig
+            if (document.getElementById('cfg-trade-direction')) document.getElementById('cfg-trade-direction').value = currentConfig.tradeDirection || 'long';
+            document.getElementById('cfg-leverage').value = currentConfig.leverage || 100;
+            document.getElementById('cfg-position-size').value = currentConfig.positionSizePct || 3.0;
+            setTradeMode(currentConfig.tradeMode || 'spot');
+            
+            document.getElementById('cfg-rsi-threshold').value = currentConfig.rsiThreshold;
+            if (document.getElementById('cfg-rsi-overbought-threshold')) document.getElementById('cfg-rsi-overbought-threshold').value = currentConfig.rsiOverboughtThreshold || 70;
+            document.getElementById('cfg-macd-require').checked = currentConfig.requireMacd;
+            if (document.getElementById('cfg-signal-window')) document.getElementById('cfg-signal-window').value = currentConfig.signalWindow || 12;
+            document.getElementById('cfg-trigger-delta').checked = currentConfig.triggerDelta;
+            document.getElementById('cfg-trigger-mtf').checked = currentConfig.triggerMtf;
+            document.getElementById('cfg-delta-threshold').value = currentConfig.deltaThreshold;
+            document.getElementById('cfg-tp-mode').value = currentConfig.tpMode || 'percent';
+            document.getElementById('cfg-tp1').value = currentConfig.tp1;
+            document.getElementById('cfg-tp2').value = currentConfig.tp2;
+            document.getElementById('cfg-tp3').value = currentConfig.tp3;
+            document.getElementById('cfg-tp1-target').value = currentConfig.tp1Target || 1.0;
+            document.getElementById('cfg-tp2-target').value = currentConfig.tp2Target || 3.0;
+            document.getElementById('cfg-tp3-target').value = currentConfig.tp3Target || 5.0;
+            updateTpConfigPreview();
+            document.getElementById('cfg-dca-amount').value = currentConfig.dcaAmount;
+            
+            if (currentConfig.dcaMaxSteps) document.getElementById('gen-max-steps').value = currentConfig.dcaMaxSteps;
+            if (currentConfig.martingaleMultiplier) document.getElementById('gen-martingale').value = currentConfig.martingaleMultiplier;
+            
+            document.getElementById('cfg-breakeven-sl').checked = currentConfig.breakevenSl;
+            document.getElementById('cfg-auto-loop').checked = !!currentConfig.autoLoop;
+            
+            // 智能策略生成器初始不再强制覆盖，改为在打开时动态计算
+        }
+
+        function closeConfig() {
+            modal.classList.add('hidden');
+            document.getElementById('tp-error').classList.add('hidden');
+        }
+
+        function generateStrategy() {
+            document.getElementById('strategy-generator').classList.remove('hidden');
+            
+            // 自动填充资金
+            const isFutures = currentTradeMode === 'futures';
+            if (isFutures) {
+                document.getElementById('gen-capital-label').textContent = "永续合约总名义本金 (自动计算: 余额 x 占比 x 杠杆)";
+                const pos = parseFloat(document.getElementById('cfg-position-size').value) || 3.0;
+                const lev = parseFloat(document.getElementById('cfg-leverage').value) || 100;
+                if (currentState.futuresBalanceUsdt) {
+                    const margin = currentState.futuresBalanceUsdt * (pos / 100);
+                    document.getElementById('gen-total-capital').value = Math.floor(margin * lev);
+                } else {
+                    document.getElementById('gen-total-capital').value = Math.floor(4200 * (pos / 100) * lev); // Fallback for preview
+                }
+            } else {
+                document.getElementById('gen-capital-label').textContent = "现货账户总可用资金 (USDT)";
+                if (currentState.spotBalanceUsdt) {
+                    document.getElementById('gen-total-capital').value = Math.floor(currentState.spotBalanceUsdt);
+                }
+            }
+        }
+
+        function closeGenerator() {
+            document.getElementById('strategy-generator').classList.add('hidden');
+            document.getElementById('gen-result-preview').classList.add('hidden');
+        }
+
+        function applyGeneratedStrategy() {
+            const capital = parseFloat(document.getElementById('gen-total-capital').value);
+            const steps = parseInt(document.getElementById('gen-max-steps').value);
+            const multiplier = parseFloat(document.getElementById('gen-martingale').value);
+            
+            let baseAmount = 0;
+            if (multiplier === 1) {
+                baseAmount = capital / steps;
+            } else {
+                baseAmount = capital * (1 - multiplier) / (1 - Math.pow(multiplier, steps));
+            }
+            
+            const isFutures = currentTradeMode === 'futures';
+            
+            // 现货模式向下取整百，合约模式向下取整到个位
+            if (isFutures) {
+                baseAmount = Math.floor(baseAmount);
+            } else {
+                baseAmount = Math.floor(baseAmount / 100) * 100;
+                document.getElementById('cfg-dca-amount').value = baseAmount;
+            }
+            
+            const tpMode = document.getElementById('gen-tp-type').value;
+            document.getElementById('cfg-tp-mode').value = tpMode === 'atr' ? 'atr_dynamic' : tpMode;
+            
+            const preview = document.getElementById('gen-result-preview');
+            preview.classList.remove('hidden');
+            
+            let planHtml = '';
+            if (isFutures) {
+                const pos = parseFloat(document.getElementById('cfg-position-size').value) || 3.0;
+                const lev = parseFloat(document.getElementById('cfg-leverage').value) || 100;
+                const maxMargin = (capital / lev).toFixed(2);
+                
+                planHtml = `<div class="font-bold text-yellow-500 mb-1">计算完成！(合约模式后端自动按比例计算)</div>`;
+                planHtml += `<div class="mb-2 text-gray-300">真实最大亏损 (保证金上限) 锁定为：<span class="text-red-400 font-bold">${maxMargin} USDT</span> (总资金的 ${pos}%)</div>`;
+                planHtml += `<div class="mb-2">基于总名义本金 ${capital} U，分 ${steps} 次加仓规划 (展示为名义价值)：</div>`;
+            } else {
+                planHtml = `<div class="font-bold text-green mb-1">计算完成！已将现货首仓金额设为 ${baseAmount} USDT</div>`;
+                planHtml += `<div class="mb-2">基于总现货资金 ${capital} U，分 ${steps} 次加仓规划：</div>`;
+            }
+            
+            planHtml += `<ul class="list-disc pl-4 space-y-1">`;
+            
+            let currentAmount = baseAmount;
+            let totalUsed = 0;
+            for(let i=1; i<=steps; i++) {
+                planHtml += `<li>第 ${i} 仓: 约 ${Math.round(currentAmount)} U (累计 ${(totalUsed + currentAmount).toFixed(0)} U)</li>`;
+                totalUsed += currentAmount;
+                currentAmount *= multiplier;
+            }
+            planHtml += `</ul>`;
+            
+            const atr = currentRealIndicators?.currentAtr || 0;
+            const tpModeDesc = document.getElementById('gen-tp-type').value === 'atr' 
+                ? `1H ATR (当前 1H ATR: ${atr.toFixed(1)} 点)` 
+                : '固定百分比 (%)';
+                
+            planHtml += `<div class="mt-2 text-blue-400">注意：每次加仓都会拉低整体均价，分批止盈线将自动基于最新整体均价和 ${tpModeDesc} 计算。</div>`;
+            
+            preview.innerHTML = planHtml;
+        }
+
+        let savingConfig = false;
+        async function saveConfig() {
+            if (savingConfig) return;
+            if (!await ensureAuthToken()) return;
+            if (savingConfig) return;
+            const leverage = parseInt(document.getElementById('cfg-leverage').value) || 100;
+            const positionSizePct = parseFloat(document.getElementById('cfg-position-size').value) || 3.0;
+            const rsiThreshold = parseInt(document.getElementById('cfg-rsi-threshold').value);
+            const rsiOverboughtThreshold = parseInt(document.getElementById('cfg-rsi-overbought-threshold').value) || 70;
+            const requireMacd = document.getElementById('cfg-macd-require').checked;
+            const signalWindow = parseInt(document.getElementById('cfg-signal-window').value) || 12;
+            const triggerDelta = document.getElementById('cfg-trigger-delta').checked;
+            const triggerMtf = document.getElementById('cfg-trigger-mtf').checked;
+            const deltaThreshold = parseInt(document.getElementById('cfg-delta-threshold').value);
+            const tpMode = document.getElementById('cfg-tp-mode').value;
+            const tp1 = parseInt(document.getElementById('cfg-tp1').value) || 0;
+            const tp2 = parseInt(document.getElementById('cfg-tp2').value) || 0;
+            const tp3 = parseInt(document.getElementById('cfg-tp3').value) || 0;
+            const tp1Target = parseFloat(document.getElementById('cfg-tp1-target').value) || 1.5;
+            const tp2Target = parseFloat(document.getElementById('cfg-tp2-target').value) || 3.0;
+            const tp3Target = parseFloat(document.getElementById('cfg-tp3-target').value) || 5.0;
+            const dcaAmount = parseInt(document.getElementById('cfg-dca-amount').value);
+            const dcaMaxSteps = parseInt(document.getElementById('gen-max-steps').value) || 5;
+            const martingaleMultiplier = parseFloat(document.getElementById('gen-martingale').value) || 1.0;
+            const breakevenSl = document.getElementById('cfg-breakeven-sl').checked;
+            const autoLoop = document.getElementById('cfg-auto-loop').checked;
+
+            if (!triggerDelta && !triggerMtf) {
+                alert("请至少选择一种微观触发条件 (Delta激增 或 MTF强多)");
+                return;
+            }
+            if (tp1 <= 0 || tp2 <= 0 || tp3 <= 0 || tp1 + tp2 + tp3 !== 100) {
+                document.getElementById('tp-error').classList.remove('hidden');
+                alert('TP1、TP2、TP3 比例必须各大于 0，且合计为 100%。');
+                return;
+            }
+
+            const payload = {
+                tradeMode: currentTradeMode, leverage, positionSizePct,
+                rsiThreshold, rsiOverboughtThreshold, requireMacd, signalWindow, triggerDelta, triggerMtf, deltaThreshold,
+                tpMode, tp1, tp2, tp3, tp1Target, tp2Target, tp3Target, dcaAmount, dcaMaxSteps, martingaleMultiplier, breakevenSl, autoLoop
+            };
+
+            const saveButton = document.getElementById('config-save-button');
+            savingConfig = true;
+            saveButton.disabled = true;
+            saveButton.textContent = '正在核对并保存…';
+            try {
+                const response = await authFetch('/api/spot-dca/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!result.ok || !['spot', 'futures'].includes(result.config?.tradeMode)) {
+                    throw new Error(result.error || '服务端未确认策略保存，未切换交易模式');
+                }
+                configRevision++;
+                currentConfig = result.config;
+                if (result.state) currentState = result.state;
+                currentTradeMode = result.config.tradeMode;
+                renderUI();
+                
+                // Apply to UI
+                if (currentTradeMode === 'futures') {
+                    document.getElementById('ui-rsi-label').innerHTML = `RSI (14) <span class="text-gray-500 text-xs">做多 < ${rsiThreshold} | 做空 > ${rsiOverboughtThreshold}</span>`;
+                    if (requireMacd) {
+                        document.getElementById('ui-macd-status').innerHTML = `<i class="fa-solid fa-arrows-turn-to-dots mr-1"></i>强制要求金叉/死叉`;
+                    } else {
+                        document.getElementById('ui-macd-status').innerHTML = `<span class="text-gray-500 font-normal">未强制要求</span>`;
+                    }
+                    if (triggerDelta) {
+                        document.getElementById('ui-delta-label').innerHTML = `1m Delta 净值 <span class="text-xs">(阈值: ±${(deltaThreshold / 1000000).toFixed(1)}M)</span>`;
+                    } else {
+                        document.getElementById('ui-delta-label').innerHTML = `1m Delta 净值 <span class="text-xs text-gray-500">(已忽略此条件)</span>`;
+                    }
+                } else {
+                    document.getElementById('ui-rsi-label').innerHTML = `RSI (14) <span class="text-gray-500 text-xs">做多触发 &lt; ${rsiThreshold}</span>`;
+                    if (requireMacd) {
+                        document.getElementById('ui-macd-status').innerHTML = `<i class="fa-solid fa-arrow-trend-up mr-1"></i>强制要求金叉确认`;
+                    } else {
+                        document.getElementById('ui-macd-status').innerHTML = `<span class="text-gray-500 font-normal">未强制要求</span>`;
+                    }
+                    if (triggerDelta) {
+                        document.getElementById('ui-delta-label').innerHTML = `1m Delta 净值 <span class="text-xs">(做多阈值: > ${(deltaThreshold / 1000000).toFixed(1)}M)</span>`;
+                    } else {
+                        document.getElementById('ui-delta-label').innerHTML = `1m Delta 净值 <span class="text-xs text-gray-500">(已忽略此条件)</span>`;
+                    }
+                }
+                // UI updates handled by fetchStatus/renderSingleTpPanel
+                if (breakevenSl) {
+                    // SL display handled by dynamic renderer
+                }
+
+                
+                alert(result.modeRestored
+                    ? '合约模式已恢复，持仓已核对。自动开仓暂未启动，已有持仓继续接受止盈监控，请核对后再启动自动交易。' +
+                        (result.adoptedSides?.length ? '\n未记录的持仓已接管，但历史TP进度无法自动推断，请核对成交记录。' : '')
+                    : "✅ 策略参数已更新并应用");
+                closeConfig();
+                fetchStatus();
+            } catch (e) {
+                alert("保存失败: " + e.message);
+            } finally {
+                savingConfig = false;
+                saveButton.disabled = false;
+                saveButton.textContent = '保存并应用策略';
+            }
+        }
+        
+        // --- Override Logic ---
+        let currentOverrideAction = 'market-buy';
+
+        async function openOverrideModal() {
+            if (!await ensureAuthToken()) return;
+            document.getElementById('override-modal').classList.remove('hidden');
+            
+            const btnShort = document.getElementById('btn-override-buy-short');
+            const btnSellShort = document.getElementById('btn-override-sell-short');
+            const btnSellLong = document.getElementById('btn-override-sell-long');
+            
+            if (currentConfig.tradeMode === 'futures') {
+                btnShort.classList.remove('hidden');
+                if(btnSellShort) btnSellShort.classList.remove('hidden');
+                if(btnSellLong) btnSellLong.innerText = '市价平多';
+            } else {
+                btnShort.classList.add('hidden');
+                if(btnSellShort) btnSellShort.classList.add('hidden');
+                if(btnSellLong) btnSellLong.innerText = '清仓卖出(现货)';
+            }
+            
+            document.getElementById('override-amount').value = currentConfig.dcaAmount || 3000;
+            const currentPriceText = document.getElementById('current-price').textContent.replace(/,/g, '');
+            document.getElementById('override-price').value = currentPriceText;
+        }
+
+        function closeOverrideModal() {
+            document.getElementById('override-modal').classList.add('hidden');
+        }
+
+        function switchOverrideTab(action, btnElement) {
+            currentOverrideAction = action;
+            const tabs = document.querySelectorAll('.override-tab-btn');
+            tabs.forEach(tab => {
+                tab.className = "override-tab-btn bg-gray-800 border border-gray-700 text-gray-400 py-2 rounded text-sm hover:bg-gray-700 transition";
+            });
+            if (action.includes('buy')) {
+                if (action === 'market-buy-short') {
+                    btnElement.className = "override-tab-btn bg-red-600/20 border border-red-500 text-red-500 py-2 rounded text-sm font-bold";
+                } else {
+                    btnElement.className = "override-tab-btn bg-green-600/20 border border-green-500 text-green-500 py-2 rounded text-sm font-bold";
+                }
+            } else {
+                btnElement.className = "override-tab-btn bg-yellow-600/20 border border-yellow-500 text-yellow-500 py-2 rounded text-sm font-bold";
+            }
+            
+            const priceContainer = document.getElementById('override-price-container');
+            const amountContainer = document.getElementById('override-amount-container');
+            const closeWarning = document.getElementById('override-close-warning');
+            
+            if (action === 'market-buy' || action === 'market-buy-short') {
+                priceContainer.classList.add('hidden');
+                amountContainer.classList.remove('hidden');
+                closeWarning.classList.add('hidden');
+            } else if (action === 'market-sell-long' || action === 'market-sell-short') {
+                priceContainer.classList.add('hidden');
+                amountContainer.classList.add('hidden');
+                closeWarning.classList.remove('hidden');
+                
+                const coinAmount = (currentState.totalCoinAmount || 0).toFixed(4);
+                let warningText = '';
+                if (currentConfig.tradeMode === 'futures') {
+                    if (action === 'market-sell-long') {
+                        warningText = `将以市价平掉您当前的【多头】合约持仓！`;
+                    } else {
+                        warningText = `将以市价平掉您当前的【空头】合约持仓！`;
+                    }
+                } else {
+                    warningText = `将以市价卖出当前全部 ${coinAmount} BTC 现货仓位！`;
+                }
+                closeWarning.textContent = warningText;
+            }
+        }
+
+        async function executeOverride() {
+            if (!await ensureAuthToken()) return;
+            const amount = document.getElementById('override-amount').value;
+            const price = document.getElementById('override-price').value;
+            
+            try {
+                await authFetch('/api/spot-dca/override', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: currentOverrideAction, amount, price })
+                });
+                alert(`✅ 强制指令已执行: [${currentOverrideAction.toUpperCase()}]`);
+                closeOverrideModal();
+                fetchStatus();
+            } catch (e) {
+                alert("执行失败: " + e.message);
+            }
+        }
+
+        async function executeQuickTrade(action) {
+            if (!await ensureAuthToken()) return;
+            let amount = 0;
+            const isFutures = currentConfig.tradeMode === 'futures';
+            
+            if (isFutures) {
+                const capital = currentState.futuresBalanceUsdt || 0;
+                const posSizePct = currentConfig.positionSizePct || 3.0;
+                const lev = currentConfig.leverage || 100;
+                const steps = currentConfig.dcaMaxSteps || 5;
+                const multiplier = currentConfig.martingaleMultiplier || 1.0;
+                
+                const totalMarginToUse = capital * (posSizePct / 100);
+                const totalNotionalSize = totalMarginToUse * lev;
+                
+                if (multiplier === 1) {
+                    amount = totalNotionalSize / steps;
+                } else {
+                    amount = totalNotionalSize * (1 - multiplier) / (1 - Math.pow(multiplier, steps));
+                }
+                amount = Math.floor(amount);
+                
+                if (amount <= 0) {
+                    alert('获取到的账户余额不足或策略配置异常，计算出的首仓名义价值为 0，无法下单。');
+                    return;
+                }
+            } else {
+                amount = currentConfig.dcaAmount || 3000;
+            }
+            
+            const isSpot = currentConfig.tradeMode === 'spot';
+            const actionName = action === 'market-buy' ? (isSpot ? '买入' : '做多') : '做空';
+            
+            if (!confirm(`确定要执行【一键${actionName}】吗？\n\n系统将按照您的策略资金管理规则，直接以首仓规模 (${amount} USDT名义价值) 执行市价开仓！`)) {
+                return;
+            }
+            
+            try {
+                await authFetch('/api/spot-dca/override', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action, amount: amount, price: '' })
+                });
+                alert(`✅ 快速开仓指令已成功执行: [市价${actionName}]`);
+                fetchStatus();
+            } catch (e) {
+                alert("快速开仓失败: " + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "id": "smart-dca",
+  "name": "SpotDCA / SmartDCA",
+  "port": 3103,
+  "page": "SpotDCA.html",
+  "trading": true,
+  "data": [
+    "spotDcaData.json"
+  ]
+}
